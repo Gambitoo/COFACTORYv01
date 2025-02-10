@@ -62,7 +62,7 @@ class RODPandS():
                 product_batches[product_key] = []
             product_batches[product_key].append(op_number)
 
-        for key, op_n in product_batches.items():
+        for _, op_n in product_batches.items():
             for op_number, data in operations.items():
                 if op_number in op_n:
                     possible_machines = [machine for routing in Routings.instances if
@@ -92,7 +92,7 @@ class RODPandS():
                         )
                     # Sort possible machines by processing time
                     if possible_machines:
-                        for i, (machine) in enumerate(possible_machines):
+                        for _, (machine) in enumerate(possible_machines):
                             machine_name = machine.MachineCode
                             if machine.Output == 1 and len(initial_solution[machine_name]) >= operations_per_machine[
                                 machine_name]:
@@ -298,9 +298,10 @@ class RODPandS():
         for exec_plan in ExecutionPlan.new_instances:
             if exec_plan.ItemRelated.Process == "ROD":
                 exec_plan_found = any(
-                    exec_plan.id == op[1].id for machine, operations in self.InputData.RODSolution.items() for op_pair
+                    exec_plan.id == op[1].id for _, operations in self.InputData.RODSolution.items() for op_pair
                     in operations for op in (op_pair if isinstance(op_pair[0], list) else [op_pair]))
                 if not exec_plan_found:
+                    print(exec_plan.ItemRelated.Name, exec_plan.Machine, exec_plan.ItemRelated.Process)
                     plans_to_exclude.append(exec_plan.id)
 
         for ep_id in plans_to_exclude:
@@ -673,13 +674,13 @@ class TrefPandS():
 
             # Generate combinations for the current batch
             for combination in product(*batch_exec_plans.values()):
-                # st = tm.time()
+                st = tm.time()
                 flattened_combination = list(chain.from_iterable(chain.from_iterable(combination)))
                 # Process the combination and get the according solution, weight and value
                 current_solution, current_solution_weight, current_solution_value = self.processCombinations(
                     flattened_combination)
-                # et = tm.time()
-                # print(f"Combination processing time: {et - st} seconds")
+                et = tm.time()
+                print(f"Combination processing time: {et - st} seconds")
 
                 # Check if the current solution is better than the best one
                 flag = self.chooseBestSolution(
@@ -696,7 +697,7 @@ class TrefPandS():
                 else:
                     no_improvement_iterations += 1
                 processed_combinations += 1
-                # print("No improvement: ", no_improvement_iterations)
+                print("No improvement: ", no_improvement_iterations)
 
                 # Stop processing combinations within this batch if no improvement is found after 1000 iterations
                 if no_improvement_iterations >= max_no_improvement:
@@ -710,6 +711,152 @@ class TrefPandS():
         print(f"Total Número de Combinações Processadas - Trefilagem: {processed_combinations}")
         return best_solutions
 
+    """def processCombinations(self, combination):
+        def get_CTs_and_Weights_cache(tref_items, routings, bins, bins_index):
+            # Precompute the cycle times and weights
+            cycle_times = {item: [0] * len(bins_index) for item in tref_items}
+            weights = {item: [0] * len(bins_index) for item in tref_items}
+
+            bin_map = {bin_code: idx for idx, bin_code in enumerate(bins)}  # Precompute bin index lookups
+
+            for routing in routings:
+                item = routing.Item
+                if item in tref_items and routing.Machine in bin_map:
+                    bin_idx = bin_map[routing.Machine]
+                    cycle_times[item][bin_idx] = routing.CycleTime
+                    weights[item][bin_idx] = routing.Weight
+            return cycle_times, weights
+
+        current_solution = []
+        current_solution_weight, current_solution_value = 0, 0
+        combination_copy = combination[:]  # Copy for safe iteration
+        item_assignment = {}
+
+        # Group exec_plans by priority (ProductionOrder.Weight)
+        priority_groups = {}
+        for exec_plan in combination_copy:
+            priority = exec_plan.ProductionOrder.Weight
+            if priority not in priority_groups:
+                priority_groups[priority] = []
+            priority_groups[priority].append(exec_plan)
+
+        # Process priorities from highest to lowest
+        sorted_priorities = sorted(priority_groups.keys(), reverse=True)
+
+        # Prepare the data structure for bins, weights, etc.
+        data = {
+            "bins": [machine.MachineCode for machine in self.Machines],
+            "bin_capacities": [machine.Input for machine in self.Machines],
+            "output_capacities": [machine.Output for machine in self.Machines],
+            "weights": [],
+            "values": [],
+            "weights_name": [],
+            "weights_PO": [],
+            "exec_plan_ids": []
+        }
+
+        machine_completion_times = {machine.MachineCode: 0 for machine in self.Machines}
+        excluded_machines = set()
+
+        for priority in sorted_priorities:
+            priority_exec_plans = priority_groups[priority]
+
+            # Convert exec_plans to data structure
+            combined_weights, combined_values, weights_names, weights_PO, exec_plan_ids = self.combineItems(priority_exec_plans)
+
+            data.update({
+                "weights": combined_weights,
+                "values": combined_values,
+                "weights_name": weights_names,
+                "weights_PO": weights_PO,
+                "exec_plan_ids": exec_plan_ids,
+                "num_items": len(combined_weights),
+                "all_items": range(len(combined_weights)),
+                "num_bins": len(data["bin_capacities"]),
+                "all_bins": range(len(data["bin_capacities"]))
+            })
+
+            all_items = [exec_plan.ItemRelated.Name for exec_plan in priority_exec_plans]
+            cycle_times, item_weights = get_CTs_and_Weights_cache(
+                all_items, Routings.instances, data["bins"], data["all_bins"]
+            )
+
+            while priority_exec_plans:
+                all_current_items = [exec_plan.ItemRelated.Name for exec_plan in priority_exec_plans]
+                excluded_machines_copy = excluded_machines.copy()
+
+                # Check if all items only have routings on excluded machines
+                all_routings_excluded = all(
+                    not any(
+                        ct > 0 and data["bins"][bin_idx] not in excluded_machines
+                        for bin_idx, ct in enumerate(cycle_times[item])
+                    )
+                    for item in all_current_items
+                )
+
+                if all_routings_excluded:
+                    excluded_machines.clear()
+
+                # Solve with KPMILP using the cached cycle_times and item_weights
+                solution = self.KPMILP(data, cycle_times, item_weights, item_assignment, excluded_machines)
+                if solution:
+                    current_solution.append(solution)
+                    current_solution_weight += solution["total_packed_weight"]
+                    current_solution_value += solution["total_objective_value"]
+
+                    for machine, items in solution["individual_weights_names"].items():
+                        for item in items:
+                            if item not in item_assignment:
+                                item_assignment[item] = machine
+
+                    # Remove allocated items and update machine completion times
+                    to_remove = []
+                    for exec_plan in priority_exec_plans:
+                        for machine in self.Machines:
+                            allocated_exec_plans = solution["allocated_exec_plans"][machine.MachineCode]
+                            if exec_plan.id in allocated_exec_plans:
+                                to_remove.append(exec_plan)
+                                machine_completion_times[machine.MachineCode] += sum(
+                                    cycle_times[exec_plan.ItemRelated.Name][
+                                        data["bins"].index(machine.MachineCode)
+                                    ] * exec_plan.Quantity
+                                    for exec_plan in priority_exec_plans if exec_plan.id in allocated_exec_plans
+                                )
+
+                    # Temporarily exclude machines exceeding the threshold
+                    active_completion_times = [comp_time for comp_time in machine_completion_times.values() if comp_time > 0]
+                    avg_completion_time = sum(active_completion_times) / len(active_completion_times) if active_completion_times else 0
+
+                    for machine_code, comp_time in machine_completion_times.items():
+                        if comp_time > avg_completion_time:
+                            excluded_machines.add(machine_code)
+                        elif machine_code in excluded_machines and comp_time <= avg_completion_time:
+                            excluded_machines.remove(machine_code)
+
+                    # Remove allocated exec_plans
+                    for exec_plan in to_remove:
+                        priority_exec_plans.remove(exec_plan)
+                        
+                    combined_weights, combined_values, weights_names, weights_PO, exec_plan_ids = self.combineItems(priority_exec_plans)
+    
+                    data.update({
+                        "weights": combined_weights,
+                        "values": combined_values,
+                        "weights_name": weights_names,
+                        "weights_PO": weights_PO,
+                        "exec_plan_ids": exec_plan_ids,
+                        "num_items": len(combined_weights),
+                        "all_items": range(len(combined_weights)),
+                        "num_bins": len(data["bin_capacities"]),
+                        "all_bins": range(len(data["bin_capacities"]))
+                    })
+
+                # Restore original excluded machines list after each KPMILP call
+                if excluded_machines_copy:
+                    excluded_machines = excluded_machines_copy
+
+        return current_solution, current_solution_weight, current_solution_value"""
+    
     def processCombinations(self, combination):
         def get_CTs_and_Weights_cache(tref_items, routings, bins, bins_index):
             # Precompute the cycle times and weights
@@ -977,7 +1124,6 @@ class TrefPandS():
             return results
         return None
 
-
 class TorcPandS():
     def __init__(self, InputData):
         self.InputData = InputData
@@ -1121,7 +1267,8 @@ class TorcPandS():
             if product_key not in product_batches:
                 product_batches[product_key] = []
             product_batches[product_key].append(op_number)
-        
+            #print(op_number)
+                
         if self.InputData.Database == 'COFACTORY_GR':
             max_ct = 0
             for product_key, operation_numbers in product_batches.items():
@@ -1141,9 +1288,9 @@ class TorcPandS():
                 possible_machines.sort(
                     key=lambda machine: self.getCycleTime(machine.MachineCode, exec_plan.ItemRelated.Name))
                 current_index = 0  # Initialize persistent index outside the inner loop
+                flag = False
                 for machine in possible_machines:
                     ct_sum = 0
-                    flag = False
                     for i, op_number in enumerate(operation_numbers[current_index:]):  # Start from current_index
                         exec_plan = operations[op_number]
                         ct = self.getCycleTime(machine.MachineCode, exec_plan.ItemRelated.Name) * exec_plan.Quantity
@@ -1161,6 +1308,23 @@ class TorcPandS():
                     if flag:
                         # Break out of machine loop if all operations have been assigned
                         break
+                while current_index < len(operation_numbers) and not flag:
+                    for machine in possible_machines:
+                        if current_index >= len(operation_numbers):
+                            break  # If all operations are assigned, stop
+                        
+                        op_number = operation_numbers[current_index]
+                        exec_plan = operations[op_number]
+                        machine_name = machine.MachineCode
+
+                        # Assign only one operation per machine
+                        initial_solution[machine_name].append(
+                            (op_number, [exec_plan.ItemRelated.Name, exec_plan, 0, 0])
+                        )
+
+                        current_index += 1  # Update current_index to skip checked operations
+                        if current_index >= len(operation_numbers): # Check if all operations have been assigned
+                            break  
         else:
             for product_key, operation_numbers in product_batches.items():
                 # Loop through all operation numbers for the given product_key
@@ -1184,7 +1348,7 @@ class TorcPandS():
             latest_ep_CoT = self.getLatestEPCoT(machine)
             self.MachineLatestEPCoT[machine] = latest_ep_CoT if latest_ep_CoT else None
             previous_CoT = previous_type = None
-            for _, data in ops:
+            for op, data in ops:
                 ST, CoT, current_type, used_eps, tref_item_CoT = self.calculateTimes(machine, data, previous_CoT,
                                                                                      previous_type, used_eps,
                                                                                      tref_item_CoT)
@@ -1207,7 +1371,7 @@ class TorcPandS():
 
             previous_CoT = previous_type = last_item_name = None
 
-            for i, (_, data) in enumerate(operations):
+            for _, (_, data) in enumerate(operations):
                 current_item_name = data[1].ItemRelated.Name
                 ST, CoT, current_type, used_eps, tref_item_CoT = self.calculateTimes(
                     machine, data, previous_CoT, previous_type, used_eps, tref_item_CoT
@@ -1310,6 +1474,7 @@ class TorcPandS():
         '''
         solution_aux = {k: list(v) for k, v in solution.items()}
         # Find the machine containing the operation
+                
         current_machine = next((m for m, ops in solution.items() if any(o[0] == op for o in ops)), None)
 
         # If the current machine is the same as the chosen one, we can't make the switch
@@ -1344,7 +1509,7 @@ class TorcPandS():
         attempted_moves = set()  # Track moves that don't improve the solution
 
         while temperature > final_temp:
-            for i in range(max_iter_per_temp):
+            for _ in range(max_iter_per_temp):
                 iter_total += 1
                 op2 = machine_to_switch = None
                 updated_machines = []
@@ -1451,7 +1616,7 @@ class TorcPandS():
         special_case_eps = [ep for ep in ExecutionPlan.new_instances if
                             ep.ItemRelated.Process == "BUN" and ep.ItemRelated.Name
                             in special_case]
-
+        
         if special_case_eps:
             used_eps, sc_eps_ST = [], {}
             for sc_ep in special_case_eps:
@@ -1476,7 +1641,7 @@ class TorcPandS():
                        and sc_ep.Quantity == data[1].Quantity
                 ]
 
-                for item, quantity in bom_items:
+                for _, quantity in bom_items:
                     for _ in range(quantity):
                         eligible_eps = [data for data in available_items if data[1].id not in used_eps]
                         if eligible_eps:
@@ -1505,11 +1670,12 @@ class TorcPandS():
                         target_ops = best_solution[sc_machine.MachineCode]
                         if target_ops:
                             candidates = [i for i, (_, data) in enumerate(target_ops) if data[3] <= last_BoM_item[3]]
-                            position = candidates[-1]
-                            target_ops.insert(position + 1, (None, [sc_ep.ItemRelated.Name, sc_ep, ST, CoT]))
-                        else:
-                            # Append sc_ep if the machine is empty
-                            target_ops.append((None, [sc_ep.ItemRelated.Name, sc_ep, ST, CoT]))
+                            if candidates:
+                                position = candidates[-1]  # Pegamos o último índice válido
+                                target_ops.insert(position + 1, (None, [sc_ep.ItemRelated.Name, sc_ep, ST, CoT]))
+                            else:
+                                # Se não houver candidatos válidos, insere na primeira posição
+                                target_ops.insert(0, (None, [sc_ep.ItemRelated.Name, sc_ep, ST, CoT]))
                     else:
                         CT = self.getCycleTime(sc_machine.MachineCode, sc_ep.ItemRelated.Name) * sc_ep.Quantity
                         ST = last_BoM_item[3] + timedelta(minutes=(CT * 0.08))
@@ -1537,7 +1703,7 @@ class TorcPandS():
                     # Ensure valid start and completion times
                     data[2], data[3] = ST, CoT
                     previous_CoT, previous_type = CoT, current_type
-
+                    
         printed_prod_orders = set()
         for machine, operations in best_solution.items():
             for op in operations:

@@ -5,8 +5,8 @@ import os
 import glob
 from datetime import datetime
 from libraries.abort_utils import abort_event
-from libraries.utils import (TimeUnit, ProductionOrder, ExecutionPlan, Machines, 
-    InputData)
+from libraries.utils import (TimeUnit, ProductionOrder, ExecutionPlan, Machines, BoM, 
+    BoMItem, InputData)
 from libraries.main_handler import executePandS, processExtrusionInput
 import logging
 logging.basicConfig(level=logging.DEBUG)
@@ -19,7 +19,6 @@ config = configparser.ConfigParser()
 config.read('config.ini')
 
 # Extract database configuration
-current_time = datetime.now()
 db_server = config['Database']['db_server']
 db_username = config['Database']['db_username']
 db_password = config['Database']['db_password']
@@ -142,12 +141,25 @@ async def select_branch():
     # Get the selected branch
     data = request.json
     select_branch = data.get('branch')
+    user_id = data.get('userId')
+    
+    if not user_id:
+        return jsonify({'status': 'error', 'message': 'User ID não fornecido.'}), 400
+
+    # Update the upload folder path for the specific user
+    user_upload_folder = os.path.join(INPUT_FOLDER, user_id)
+
+    os.makedirs(user_upload_folder, exist_ok=True)
+
+    app.config['UPLOAD_FOLDER'] = user_upload_folder
     
     # Clear the cached data
     ExecutionPlan.clear_instances()
     Machines.clear_instances()
     TimeUnit.clear_instances()
-    
+    ProductionOrder.clear_instances()
+    BoM.clear_instances()
+    BoMItem.clear_instances()
     
     if select_branch != "COFACTORY_PT" and select_branch != "COFACTORY_GR":
         return jsonify({'status': 'error', 'message': 'Unidade de produção inválida.'}), 400

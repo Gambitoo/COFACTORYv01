@@ -25,8 +25,8 @@
       <transition name="fade">
         <div v-if="showFilters" style="
             position: absolute;
-            top: 40px;
-            right: 10px;
+            top: 50px;
+            right: 5px;
             background: white;
             box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
             border: 1px solid #ddd;
@@ -43,7 +43,7 @@
           </div>
           <!-- Additional Filters -->
           <div style="margin-bottom: 10px;">
-            <label style="font-weight: bold;">Filtrar por Máquina</label>
+            <label style="font-weight: bold;">Filtrar por Processo</label>
             <div v-if="hasRODMachines">
               <label>
                 <input type="checkbox" value="ROD" v-model="selectedMachineTypes" />
@@ -90,7 +90,7 @@ import {
   LinearScale,
   TimeScale,
 } from 'chart.js';
-import 'chartjs-adapter-date-fns'; 
+import 'chartjs-adapter-date-fns';
 import zoomPlugin from 'chartjs-plugin-zoom';
 import { startOfWeek, endOfWeek, addWeeks, subWeeks } from 'date-fns'; // Import week navigation functions
 
@@ -124,9 +124,8 @@ export default {
     };
   },
   computed: {
-    // Check if there are any ROD machines
-    hasRodMachines() {
-      return this.originalData.datasets[0].data.some((dataset) => dataset.y.startsWith('ROD'));
+    hasRODMachines() {
+      return this.originalOptions.scales.y.labels.some((label) => label && label.startsWith('ROD'));
     }
   },
   methods: {

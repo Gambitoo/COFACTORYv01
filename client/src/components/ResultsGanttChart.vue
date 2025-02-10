@@ -32,7 +32,7 @@
             ">
           <!-- Additional Filters -->
           <div style="margin-bottom: 10px;">
-            <label style="font-weight: bold;">Filtrar por Máquina</label>
+            <label style="font-weight: bold;">Filtrar por Processo</label>
             <div v-if="hasRODMachines">
               <label>
                 <input type="checkbox" value="ROD" v-model="selectedMachineTypes" />
@@ -108,8 +108,8 @@ export default {
   },
   computed: {
     // Check if there are machines that start with "ROD"
-    hasRodMachines() {
-      return this.originalData && this.originalData.datasets[0].data.some((dataset) => dataset.y.startsWith('ROD'));
+    hasRODMachines() {
+      return this.originalOptions.scales.y.labels.some((label) => label && label.startsWith('ROD'));
     }
   },
   methods: {
@@ -173,6 +173,8 @@ export default {
         const order = ['ROD', 'MDW', 'BUN'];
         return order.indexOf(a) - order.indexOf(b);
       });
+
+      console.log(this.originalData.datasets[0].data);
 
       // Filter datasets based on selected machine types
       const filteredDatasets = this.originalData.datasets[0].data.filter((dataset) =>

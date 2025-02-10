@@ -95,7 +95,21 @@ export default {
     cursor: pointer;
 }
 
-.modal-actions button:hover {
-    background-color: #f0f0f0;
+.modal-actions button:first-child {
+    background-color: #4CAF50;
+    color: white;
+}
+
+.modal-actions button:first-child:hover {
+    background-color: #45a049;
+}
+
+.modal-actions button:last-child {
+    background-color: #f44336;
+    color: white;
+}
+
+.modal-actions button:last-child:hover {
+    background-color: #d32f2f;
 }
 </style>

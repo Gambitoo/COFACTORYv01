@@ -91,9 +91,11 @@ export const options = reactive({
 });
 
 const generateColor = (index, isBorder = false) => {
-  const colors = ['#42A5F5', '#FF7043', '#FFCA28', '#66BB6A', '#AB47BC'];
-  const baseColor = colors[index % colors.length]; // Cycle through colors
-  return isBorder ? shadeColor(baseColor, -20) : baseColor;
+  // Gera cores com base no índice variando a tonalidade (hue) no espectro HSL
+  const hue = (index * 137.508) % 360; // Número de ouro para distribuição uniforme
+  const saturation = 70; // Saturação fixa para manter cores vibrantes
+  const lightness = isBorder ? 40 : 60; // Diferença entre borda e preenchimento
+  return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 };
 
 // Utility function to darken/lighten colors

@@ -132,6 +132,11 @@ class BoM:
         self.Revision = Revision
         self.Default = Default
 
+    @classmethod
+    def clear_instances(cls):
+        cls.instances.clear()
+        cls.id = 0
+
     def add_BoM_items(self, *args):
         self.BoMItems.extend(args)
 
@@ -147,6 +152,11 @@ class BoMItem:
         self.NetQuantity = NetQuantity
         self.NetQuantityUnit = NetQuantityUnit
         self.Quantity = Quantity
+        
+    @classmethod
+    def clear_instances(cls):
+        cls.instances.clear()
+        cls.id = 0
 
 class ProductionOrder:
     id = 0
@@ -204,6 +214,10 @@ class ExecutionPlan:
     @classmethod
     def remove_by_id(cls, target_id):
         cls.new_instances = [instance for instance in cls.new_instances if instance.id != target_id]
+        
+    @classmethod
+    def remove_by_bomId(cls, target_bomId):
+        cls.new_instances = [instance for instance in cls.new_instances if instance.BoMId != target_bomId]
 
 class Machines:
     instances = []
@@ -342,38 +356,42 @@ class InputData:
         def if_routing_exists(item_name, machines):
             """Check if there is a valid routing for the given item and machine list."""
             return any(routing.Item == item_name and routing.Machine in machines for routing in Routings.instances)
-
-        def create_eps(bom, quantity, prod_order, first_iter):
-            """Create ExecutionPlans for the main item and all its BOM dependencies."""
+        
+        def create_eps(bom, quantity, prod_order, first_iter, parent_item=None):
+            main_item = Items.get_Item(bom.ItemRoot)
+            
+            # Criar plano de execução para o item principal se for a primeira iteração
             if first_iter and if_routing_exists(main_item.Name, machines_Torc):
                 ExecutionPlan(None, main_item, float(quantity), None, prod_order)
             elif not if_routing_exists(main_item.Name, machines_Torc):
                 no_routings.append(main_item.Name)
+                return
+
             for BoM_Item in bom.BoMItems:
                 item = Items.get_Item(BoM_Item.ItemRelated)
                 production_qty = (BoM_Item.NetQuantity * quantity) / bom.BoMQuantity
+
+                # Determinar se é Torc ou Tref com base no parent item
+                machine_list = machines_Torc if parent_item is None or parent_item.Process == "BUN" else machines_Tref
+
                 if item.Process == "BUN":
-                    # new_prod_order = ProductionOrder(item, quantity, prod_order.DD, prod_order.Weight)
+                    # Criar plano de execução para o item atual
                     for _ in range(BoM_Item.Quantity):
-                        if if_routing_exists(item.Name, machines_Torc):
-                            ExecutionPlan(main_item, item, float(production_qty), bom.id, prod_order)
+                        if if_routing_exists(item.Name, machine_list):
+                            ExecutionPlan(main_item if parent_item is None else parent_item, item,
+                                          float(production_qty), bom.id, prod_order)
                         else:
                             no_routings.append(item.Name)
-                        for second_bom in BoM.instances:
-                            if second_bom.ItemRoot == item.Name:
-                                for BoM_Item in second_bom.BoMItems:
-                                    tref_item = Items.get_Item(BoM_Item.ItemRelated)
-                                    for _ in range(BoM_Item.Quantity):
-                                        sub_production_qty = (BoM_Item.NetQuantity * quantity) / second_bom.BoMQuantity
-                                        if if_routing_exists(tref_item.Name, machines_Tref):
-                                            ExecutionPlan(item, tref_item, float(sub_production_qty), second_bom.id,
-                                                          prod_order)
-                                        else:
-                                            no_routings.append(tref_item.Name)
+                        # Recursivamente chamar a função para os itens filhos no BoM
+                        for sub_bom in BoM.instances:
+                            if sub_bom.ItemRoot == item.Name:
+                                create_eps(sub_bom, production_qty, prod_order, False, item)
                 else:
+                    # Criar plano de execução para itens que não são BUN
                     for _ in range(BoM_Item.Quantity):
                         if if_routing_exists(item.Name, machines_Tref):
-                            ExecutionPlan(main_item, item, float(production_qty), bom.id, prod_order)
+                            ExecutionPlan(main_item if parent_item is None else parent_item, item,
+                                          float(production_qty), bom.id, prod_order)
                         else:
                             no_routings.append(item.Name)
 
@@ -402,7 +420,7 @@ class InputData:
         return no_routings
 
     def createRemainingExecPlans(self, PT_Settings):
-        Tref_items, ROD_items = {}, {}
+        Tref_items = {}
 
         for TU in TimeUnit.new_instances:
             for exec_plan in TU.ExecutionPlans:
@@ -424,7 +442,15 @@ class InputData:
                                 if prod_qty != 0:
                                     ExecutionPlan(tref_item, ROD_item, ROD_item.OrderIncrement, bom.id,
                                                   prod_order)
-                            ROD_items[ROD_item.Name] = ROD_items.get(ROD_item.Name, 0) + prod_qty
+        
+        # After creating all execution plans, remove all instances where Process isnt ROD, MDW or BUN   
+        plans_to_exclude = []     
+        for exec_plan in ExecutionPlan.new_instances:
+            if exec_plan.ItemRelated.Process is None or exec_plan.ItemRelated.Process not in ["ROD", "MDW", "BUN"]:
+                plans_to_exclude.append(exec_plan.id)
+                
+        for ep_id in plans_to_exclude:
+            ExecutionPlan.remove_by_id(ep_id)    
 
     def readDBData(self):
         def fetch_data(queries):
@@ -534,6 +560,7 @@ class InputData:
         def create_items_objects(rows):
             for row in rows:
                 main_item, input, diameter, unit, order_increment, process, material_type = row
+                process = process if isinstance(process, str) and process != "-" else None
                 Items(main_item, material_type, unit, input, round(diameter, 3), process, order_increment)
 
         def create_machines_objects(rows):

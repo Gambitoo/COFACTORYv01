@@ -1,7 +1,7 @@
 <template>
   <div class="gantt-modal">
     <div class="modal-content">
-      <h2>Novo Plano de Execução</h2>
+      <h2>Novo Planeamento</h2>
       <div class="gantt-chart">
         <!-- Render the Gantt chart -->
         <ResultsGanttChart :data="chartData" />
@@ -59,8 +59,8 @@ export default {
   padding: 20px;
   border-radius: 10px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
-  width: 80%;
-  max-height: 90%;
+  width: 90%;
+  max-height: 95%;
   overflow-y: auto;
 }
 

@@ -1,14 +1,27 @@
 <template>
     <div class="branch-modal">
         <h2>Escolha a Unidade de Produção:</h2>
-        <button @click="$emit('confirm', 'COFACTORY_PT')">COFACTORY PT</button>
-        <button @click="$emit('confirm', 'COFACTORY_GR')">COFACTORY GR</button>
+        <button @click="selectBranch('COFACTORY_PT')">COFACTORY PT</button>
+        <button @click="selectBranch('COFACTORY_GR')">COFACTORY GR</button>
+        <div class="enter-user-id">
+            <input id="user_id" type="text" v-model="userId" />
+        </div>
     </div>
 </template>
 
 <script>
 export default {
     name: "BranchSelectionModal",
+    data() {
+        return {
+            userId: "", // Reactive variable to store input value
+        };
+    },
+    methods: {
+        selectBranch(branch) {
+            this.$emit("confirm", { branch, userId: this.userId });
+        },
+    },
 };
 </script>
 

@@ -1,5 +1,5 @@
 <template>
-    <div class="main-view">
+    <div class="main-view" :class="{ 'disabled-content': showBranchModal }">
         <header class="header">
             <h1>COFACTORY</h1>
             <button @click="createNewPlan" class="create-plan-btn">Criar Novo Plano</button>
@@ -9,27 +9,25 @@
             <GanttChart :isLoading="isAlgorithmRunning" :key="renderKey" />
         </div>
 
-        <BranchSelectionModal v-if="showBranchModal" @confirm="handleBranchSelection" />
-
-        <!-- Main Criteria Modal -->
+        <!-- Other modals -->
         <CriteriaModal v-if="showCriteriaModal" :title="modalTitle" :criteria="criteria"
             :confirmCallback="handleModalConfirm" />
 
-        <!-- Remove Machines Modal -->
         <RemoveMachinesModal v-if="showRemoveMachinesModal" :machines="availableMachines"
             @confirm="handleRemoveMachinesConfirm" @close="closeRemoveMachinesModal" />
 
-        <!-- Remove BoM's Modal -->    
         <RemoveBoMsModal v-if="showRemoveBoMsModal" :BoMs="inputBoMs" @confirm="handleRemoveBoMsConfirm"
             @close="closeRemoveBoMsModal" />
-        
-        <!-- Results Modal -->
+
         <ResultsModal v-if="showResultsModal" @confirm="handleResultsConfirm" @cancel="closeResultsModal"
             @rerun="rerunPlan" />
 
-        <!-- Results Modal -->
         <MissingItemsModal v-if="showMissingItemsModal" :noRoutings="noRoutings" :noBoms="noBoms"
             @close="closeMissingItemsModal" />
+    </div>
+
+    <div v-if="showBranchModal" class="modal-overlay">
+        <BranchSelectionModal @confirm="handleBranchSelection" />
     </div>
 </template>
 
@@ -53,7 +51,7 @@ export default {
             showResultsModal: false,
             showGanttChart: false,
             modalTitle: "",
-            criteria: ["Remover Máquinas", "Organizar por Melhor Cycle Time", "Sequenciamento por Diâmetro", "Consumir Stock disponível", "Menor Número de Mudanças", "Desativar BoM's"],
+            criteria: ["Remover Máquinas", "Organizar por Melhor Cycle Time", "Sequenciamento por Diâmetro", "Consumir Stock disponível", "Menor Número de Mudanças", "Desativar BoMs"],
             selectedCriteria: {},
             availableMachines: [],
             inputBoMs: null as any,
@@ -74,12 +72,12 @@ export default {
         window.removeEventListener("beforeunload", this.handlePageUnload);
     },
     methods: {
-        async handleBranchSelection(branch) {
+        async handleBranchSelection({branch, userId}) {
             try {
                 const response = await fetch('http://localhost:5001/selectBranch', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ branch }),
+                    body: JSON.stringify({ branch, userId }),
                 });
 
                 const data = await response.json();
@@ -403,5 +401,25 @@ export default {
     margin: 10px 20px;
     box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
     overflow: auto;
+}
+
+/* All other interactions are disabled when the branch selection is open */
+.disabled-content {
+    pointer-events: none;
+    opacity: 0.5;
+}
+
+/* Modal overlay: remains fully interactive */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+.enter-user-id {
+    margin-right: 60px;
 }
 </style>
