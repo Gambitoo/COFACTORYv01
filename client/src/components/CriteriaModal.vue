@@ -1,5 +1,5 @@
 <template>
-    <div class="modal-backdrop" v-if="visible">
+    <div class="modal-backdrop">
         <div class="modal-content">
             <h2>{{ title }}</h2>
             <div class="checkbox-group">
@@ -21,7 +21,6 @@ export default {
     props: {
         title: String,
         criteria: Array,
-        confirmCallback: Function,
     },
     data() {
         return {
@@ -35,11 +34,10 @@ export default {
                 result[index] = this.selectedCriteria.includes(index); 
                 return result;
             }, {}); 
-            this.confirmCallback(newSelectedCriteria); 
-            this.visible = false;
+            this.$emit("confirm", newSelectedCriteria);
         },
         close() {
-            this.visible = false;
+            this.$emit("close");
         },
     },
 };

@@ -5,30 +5,31 @@ from .abort_utils import abort_event
 from .utils import (ProductionOrder, Items, ExecutionPlan)
 from .algorithms import (RODPandS, TrefPandS, TorcPandS)
 
-def processExtrusionInput(inputData, file_name):
+def processExtrusionInput(dataHandler, file_name):
     no_routings, no_bom = None, []
     Extrusion_Input = load_workbook(file_name)
     Extrusion_Input_Active = Extrusion_Input.active
     for row in Extrusion_Input_Active.iter_rows(min_row=2, values_only=True):
         product_name, qty, due_date, weight = row[:4]
-        item = Items.get_Item(product_name)
+        item = Items.get_Item(product_name, dataHandler.Database)
         if item:
-            prod_qty = float(inputData.checkStock(product_name, qty) if inputData.Criteria[3] else qty)
+            prod_qty = float(dataHandler.checkStock(product_name, qty) if dataHandler.Criteria[3] else qty)
             if prod_qty != 0:
                 prod_order = ProductionOrder(item, prod_qty, due_date, weight)
-                no_routings = inputData.createExecPlans(item, prod_order)
+                dataHandler.ProductionOrders.append(prod_order)
+                no_routings = dataHandler.createExecPlans(item, prod_order)
         else:
             no_bom.append(product_name)
             
-    if inputData.Criteria[5]:
-        print(inputData.Criteria)
+    if dataHandler.Criteria[5]:
+        print(dataHandler.Criteria)
         plans_to_exclude = []
 
         # Iterate over each root Item and its corresponding deactivated BoMs
-        for item_root, BoMs_to_deactivate in inputData.Criteria[5].items():
+        for item_root, BoMs_to_deactivate in dataHandler.Criteria[5].items():
             stop_flag = False
             plans_by_bom_id = {}
-            for exec_plan in ExecutionPlan.new_instances:
+            for exec_plan in dataHandler.ExecutionPlans:
                 if exec_plan.ItemRoot and exec_plan.ItemRoot.Name == item_root:
                     # Organize the execution plans by BoMId for this root Item
                     stop_flag = True
@@ -51,11 +52,11 @@ def processExtrusionInput(inputData, file_name):
 
         # Remove the execution plans by their id
         for bomId in plans_to_exclude:
-            ExecutionPlan.remove_by_bomId(bomId)
+            dataHandler.removeEPbyBoMID(bomId)
 
     return no_routings, no_bom
 
-def executePandS(inputData, PT_Settings):
+def executePandS(dataHandler, PT_Settings):
     """Execute Planning and Scheduling with abort functionality."""
     if abort_event.is_set():
         print("Execution aborted before starting.")
@@ -68,7 +69,7 @@ def executePandS(inputData, PT_Settings):
         print("Execution aborted during Tref calculation.")
         return False
     st_Tref = tm.time()
-    Tref = TrefPandS(InputData=inputData)
+    Tref = TrefPandS(DataHandler=dataHandler)
     Tref.Planning()  # Ensure Tref.Planning() checks for abort periodically
     execution_time_ROD = 0
     
@@ -77,9 +78,9 @@ def executePandS(inputData, PT_Settings):
         if abort_event.is_set():
             print("Execution aborted during ROD Planning.")
             return False
-        inputData.createRemainingExecPlans(PT_Settings)
+        dataHandler.createRemainingExecPlans(PT_Settings)
         st_ROD = tm.time()
-        ROD = RODPandS(InputData=inputData)
+        ROD = RODPandS(DataHandler=dataHandler)
         ROD.Planning()  # Ensure ROD.Planning() checks for abort periodically
         if abort_event.is_set():
             print("Execution aborted during ROD Scheduling.")
@@ -101,7 +102,7 @@ def executePandS(inputData, PT_Settings):
         print("Execution aborted during Torc calculation.")
         return False
     st_Torc = tm.time()
-    TorcPandS(InputData=inputData)  # Ensure TorcPandS() checks for abort periodically
+    TorcPandS(DataHandler=dataHandler)  # Ensure TorcPandS() checks for abort periodically
     et_Torc = tm.time()
     execution_time_Torc = et_Torc - st_Torc
     

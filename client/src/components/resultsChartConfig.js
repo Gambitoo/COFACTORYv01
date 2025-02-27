@@ -4,7 +4,7 @@ import { startOfWeek, endOfWeek } from 'date-fns';
 
 export const machines = ref([]);
 const exec_plans = ref([]);
-const time_units = ref([]);
+const new_exec_plans = ref([]);
 export const data = reactive({
   datasets: [],
 });
@@ -116,8 +116,9 @@ const shadeColor = (color, percent) => {
 export const getData = async () => {
   const path = 'http://localhost:5001/getNewChartData';
   try {
-    const res = await axios.get(path);
+    const res = await axios.get(path, { withCredentials: true });
     exec_plans.value = res.data.exec_plans;
+    new_exec_plans.value = res.data.new_exec_plans;
     machines.value = res.data.machines;
 
     machines.value.sort((a, b) => {
@@ -142,7 +143,7 @@ export const getData = async () => {
     });
 
     // Ensure the y-axis labels match the machine names
-    options.scales.y.labels = machines.value.map((machine, i) => machine.name);
+    options.scales.y.labels = machines.value.map((machine, _) => machine.name);
 
     data.datasets.splice(0, data.datasets.length); // Clear existing data
 
@@ -162,6 +163,35 @@ export const getData = async () => {
     let maxCoT = -Infinity; // Track the latest completion time
 
     exec_plans.value.forEach((plan) => {
+      const startTime = new Date(plan.ST).getTime();
+      const completionTime = new Date(plan.CoT).getTime();
+
+      // Update min and max
+      if (startTime < minST) minST = startTime;
+      if (completionTime > maxCoT) maxCoT = completionTime;
+
+      let data = {
+        x: [
+          new Date(plan.ST).toISOString(), // Ensure valid ISO string
+          new Date(plan.CoT).toISOString(),
+        ],
+        y: plan.machine,
+        name: plan.itemRelated,
+        root: plan.itemRoot,
+        quantity: plan.quantity,
+        orderInc: plan.orderIncrement,
+      };
+      dt.data.push(data);
+
+      // Override the color to a greyish shade
+      const greyColor = "#B0BEC5"; // Light grey (you can adjust this)
+      const greyBorderColor = "#78909C"; // Darker grey for the border
+        
+      dt.backgroundColor.push(greyColor);
+      dt.borderColor.push(greyBorderColor);
+    });
+
+    new_exec_plans.value.forEach((plan) => {
       const startTime = new Date(plan.ST).getTime();
       const completionTime = new Date(plan.CoT).getTime();
 

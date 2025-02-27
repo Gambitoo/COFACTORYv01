@@ -10,12 +10,12 @@ from collections import Counter, defaultdict
 from .utils import (BoM, Routings, TimeUnit, ProductionOrder, ExecutionPlan, Machines, Items, SetupTimesByMaterial)
 
 class RODPandS():
-    def __init__(self, InputData):
-        self.InputData = InputData
-        self.Machines, self.RODItems = self.InputData.RODMachines, self.InputData.RODItems
-        self.InitialSolution = self.Operations = self.machineLatestEPCoTs = None
+    def __init__(self, DataHandler):
+        self.DataHandler = DataHandler
+        self.Machines, self.RODItems = self.DataHandler.RODMachines, self.DataHandler.RODItems
+        self.InitialSolution = self.Operations = self.MachinePreviousPlanCoT = None
 
-    def generateInitialSolution(self, Combination):
+    def generateSolution(self, Combination):
         '''Generates a randomized initial solution.'''
         initial_solution = {machine.MachineCode: [] for machine in self.Machines}  # Use machine names
         sorted_exec_plans = sorted(Combination, key=lambda x: x.ProductionOrder.DD)
@@ -23,7 +23,7 @@ class RODPandS():
 
         possible_machines = []
         for op_number, data in operations.items():
-            for routing in Routings.instances:
+            for routing in self.DataHandler.Routings:
                 if routing.Item == data.ItemRelated.Name:
                     for machine in self.Machines:
                         if routing.Machine == machine.MachineCode and machine not in possible_machines:
@@ -65,12 +65,12 @@ class RODPandS():
         for _, op_n in product_batches.items():
             for op_number, data in operations.items():
                 if op_number in op_n:
-                    possible_machines = [machine for routing in Routings.instances if
+                    possible_machines = [machine for routing in self.DataHandler.Routings if
                                          routing.Item == data.ItemRelated.Name
                                          for machine in self.Machines if routing.Machine == machine.MachineCode]
-                    if self.InputData.Criteria[1]:
+                    if self.DataHandler.Criteria[1]:
                         machine_cycle_weight = {}
-                        for routing in Routings.instances:
+                        for routing in self.DataHandler.Routings:
                             if routing.Item == data.ItemRelated.Name:
                                 cycle_time = (routing.CycleTime / 1000) * data.ProductionOrder.Quantity
                                 weight = routing.Weight
@@ -84,7 +84,7 @@ class RODPandS():
                     # Choose the machine with highest weight
                     else:
                         machine_weight = {}
-                        for routing in Routings.instances:
+                        for routing in self.DataHandler.Routings:
                             if routing.Item == data.ItemRelated.Name:
                                 machine_weight[routing.Machine] = routing.Weight
                         possible_machines.sort(
@@ -121,65 +121,79 @@ class RODPandS():
                                 initial_solution[machine_name].append(op_number)
                             break
 
-        machineLatestCoTs = {machine: self.getLatestEPCoT(machine) or None for machine in initial_solution}
+        MachinePreviousPlanCoT = {machine: self.getPreviousPlanCoT(machine) or None for machine in initial_solution}
 
         # print(
         #    "Initial Random Solution with Operations Ordered by Ascending Due Date and Placed in Machines with Least Processing Time: {}".format(
         #        initial_solution))
 
-        self.InitialSolution, self.Operations, self.machineLatestEPCoTs = initial_solution, operations, machineLatestCoTs
-
+        self.InitialSolution, self.Operations, self.MachinePreviousPlanCoT = initial_solution, operations, MachinePreviousPlanCoT
+        
     def getSetupTime(self, prev_type, cur_type):
-        return next((float(instance.SetupTime) for instance in SetupTimesByMaterial.instances
+        return next((float(instance.SetupTime) for instance in self.DataHandler.SetupTimesByMaterial
                      if instance.FromMaterial == prev_type and instance.ToMaterial == cur_type), 0.0)
 
     def getCycleTime(self, machine, item_name):
-        return next(((routing.CycleTime / 1000) for routing in Routings.instances
+        return next(((routing.CycleTime / 1000) for routing in self.DataHandler.Routings
                      if routing.Item == item_name and routing.Machine == machine), None)
 
     def getMaterialType(self, item_name):
         return next((ROD_item.MaterialType for ROD_item in self.RODItems if ROD_item.Name == item_name),
                     None)
 
-    def nextShiftStart(self, current_time, shift_start_times):
+    def nextShiftStartTime(self, current_time, shift_start_times):
         for shift_start in shift_start_times:
             shift_start_dt = datetime.combine(current_time.date(), shift_start)
             if current_time < shift_start_dt:
                 return shift_start_dt
         return datetime.combine(current_time.date() + timedelta(days=1), shift_start_times[0])
 
-    def getLatestEPCoT(self, machine):
+    def getPreviousPlanCoT(self, machine):
+        """Get the Completion Time of the latest Execution Plan in the current machine"""
         shift_start_times = [time(0, 0), time(8, 0), time(16, 0)]
-        with pyodbc.connect(self.InputData.ConnectionString) as conn:  # Opens the connection
-            with conn.cursor() as cursor:  # Opens the cursor
-                # Check if ExecutionPlans is populated
-                cursor.execute("SELECT COUNT(*) FROM ExecutionPlans")
-                row_count = cursor.fetchone()[0]
 
-                # Check if the table is empty
-                if row_count != 0:
-                    cursor.execute(
-                        "SELECT MAX(ep.CompletionTime) AS MaxCompletionTime "
-                        "FROM ExecutionPlans ep "
-                        "JOIN Items i ON ep.Item COLLATE SQL_Latin1_General_CP1_CI_AS = i.Item "
-                        "WHERE i.Process = 'ROD' and ep.Machine = ?", (machine,)
-                    )
-                    latest_ep_CoT = cursor.fetchone()[0]  # Fetch the first element of the result
-                else:
-                    latest_ep_CoT = None
+        with pyodbc.connect(self.DataHandler.ConnectionString) as conn, conn.cursor() as cursor:
+            # Get latest execution plan for the machine
+            cursor.execute(
+                """SELECT TOP 1 ep.Item, ep.CompletionTime 
+                   FROM ExecutionPlans ep 
+                   JOIN Items i ON ep.Item COLLATE SQL_Latin1_General_CP1_CI_AS = i.Item 
+                   WHERE i.Process = 'ROD' AND ep.Machine = ? 
+                   ORDER BY CompletionTime DESC""", 
+                (machine,)
+            )
+            result = cursor.fetchone()
+            latest_ep_item, previous_plan_CoT = result if result else (None, None)
+            
+        # Determine start time
+        start_time = max(previous_plan_CoT, self.DataHandler.CurrentTime) if previous_plan_CoT else self.DataHandler.CurrentTime
+            
+        return [latest_ep_item, self.nextShiftStartTime(start_time, shift_start_times)]
 
-        start_time = latest_ep_CoT if latest_ep_CoT and latest_ep_CoT > self.InputData.CurrentTime else self.InputData.CurrentTime
+        # Determine previous material type
+        previous_type = next((item.MaterialType for item in self.DataHandler.Items if item.Name == latest_ep_item), None)
 
-        return self.nextShiftStart(start_time, shift_start_times)
+        # Determine start time
+        start_time = max(previous_plan_CoT, self.DataHandler.CurrentTime) if previous_plan_CoT else self.DataHandler.CurrentTime
 
-    def getSTandCoT(self, data, CT, machine_ST, previous_CoT, setup_time):
-        data.ST = (previous_CoT + timedelta(hours=setup_time)) if previous_CoT else machine_ST
+        # Apply setup time if material type changes
+        current_type = self.ExecutionPlans[0].ItemRelated.MaterialType
+        if current_type != previous_type:
+            setup_time = next(
+                (float(instance.SetupTime) for instance in self.DataHandler.SetupTimesByMaterial
+                 if instance.FromMaterial == previous_type and instance.ToMaterial == current_type), 0.0)
+            start_time += timedelta(hours=setup_time)
+
+        return self.nextShiftStartTime(start_time, shift_start_times)
+
+    def getSTandCoT(self, data, CT, machine_ST, previous_item_CoT, setup_time):
+        data.ST = (previous_item_CoT + timedelta(hours=setup_time)) if previous_item_CoT else machine_ST
         data.ST += timedelta(minutes=(CT * 0.12))
         data.CoT = data.ST + timedelta(minutes=CT)
 
     def Planning(self):
         # Gather all unique MDW-related items
-        tref_list = {exec_plan.ItemRelated for exec_plan in ExecutionPlan.new_instances if
+        tref_list = {exec_plan.ItemRelated for exec_plan in self.DataHandler.ExecutionPlans if
                      exec_plan.ItemRelated.Process == "MDW"}
 
         # Create ROD execution plans for each MDW item
@@ -187,7 +201,7 @@ class RODPandS():
         for tref_item in tref_list:
             exec_plan_list = []
             temp_list = []
-            for exec_plan in ExecutionPlan.new_instances:
+            for exec_plan in self.DataHandler.ExecutionPlans:
                 if exec_plan.ItemRelated.Process == "ROD" and exec_plan.ItemRoot.Name == tref_item.Name:
                     if temp_list and exec_plan.BoMId != temp_list[-1].BoMId:
                         exec_plan_list.append(temp_list)
@@ -204,14 +218,14 @@ class RODPandS():
 
         best_solution, best_objValue = None, 0
         for data in ROD_combinations:
-            self.generateInitialSolution(data)
+            self.generateSolution(data)
             objValue = self.objFun(self.InitialSolution)
             if objValue >= best_objValue:
                 best_solution, best_objValue = self.InitialSolution, objValue
 
-        self.InputData.RODSolution = best_solution
+        self.DataHandler.RODSolution = best_solution
 
-        for machine, operations in self.InputData.RODSolution.items():
+        for machine, operations in self.DataHandler.RODSolution.items():
             if not operations:
                 continue
 
@@ -254,25 +268,26 @@ class RODPandS():
                     operations = [group for group in operations if len(group) > 0]
 
                 # Update the machine's operations in BestSolution after merging
-                self.InputData.RODSolution[machine] = operations
+                self.DataHandler.RODSolution[machine] = operations
 
     def Scheduling(self):
         """Add Starting Time (ST) and Completion Time (CoT) to each Execution Plan using the final solution."""
-        for machine, operations in self.InputData.RODSolution.items():
+        for machine, operations in self.DataHandler.RODSolution.items():
             if not operations:
                 continue
-            latest_ep_CoT = self.machineLatestEPCoTs[machine]
-            previous_CoT = previous_type = current_type = None
+            previous_plan_CoT = self.MachinePreviousPlanCoT[machine][1]
+            previous_type = next((item.MaterialType for item in self.DataHandler.Items if item.Name == self.MachinePreviousPlanCoT[machine][0]), None)
+            previous_item_CoT = current_type = None
             for i, op in enumerate(operations):
-                Max_CoT = self.InputData.CurrentTime.replace(hour=0, minute=0, second=0, microsecond=0)
+                Max_CoT = self.DataHandler.CurrentTime.replace(hour=0, minute=0, second=0, microsecond=0)
                 if isinstance(op, list):
                     for j, op_n in enumerate(op):
                         data = self.Operations[op_n]
                         data.Machine = machine
                         current_type = self.getMaterialType(data.ItemRelated.Name)
                         CT = self.getCycleTime(machine, data.ItemRelated.Name) * data.Quantity
-                        setup_time = self.getSetupTime(previous_type, current_type)
-                        self.getSTandCoT(data, CT, latest_ep_CoT, previous_CoT, setup_time)
+                        setup_time = self.getSetupTime(previous_type, current_type) if previous_type != current_type else 0.0
+                        self.getSTandCoT(data, CT, previous_plan_CoT, previous_item_CoT, setup_time)
                         data.Position = j + 1
                         op[j] = [op_n, data]
                         Max_CoT = max(Max_CoT, data.CoT)
@@ -282,30 +297,30 @@ class RODPandS():
                     data.Machine = machine
                     current_type = self.getMaterialType(data.ItemRelated.Name)
                     CT = self.getCycleTime(machine, data.ItemRelated.Name) * data.Quantity
-                    setup_time = self.getSetupTime(previous_type, current_type)
-                    self.getSTandCoT(data, CT, latest_ep_CoT, previous_CoT, setup_time)
+                    setup_time = self.getSetupTime(previous_type, current_type) if previous_type != current_type else 0.0
+                    self.getSTandCoT(data, CT, previous_plan_CoT, previous_item_CoT, setup_time)
                     operations[i] = [op, data]
                     Max_CoT = data.CoT
                     data.Position = 1
                     previous_type = current_type
-                previous_CoT = Max_CoT
+                previous_item_CoT = Max_CoT
 
         self.removeExecPlans()
 
     def removeExecPlans(self):
         # Remove execution plans that are not part of the best ROD solution
         plans_to_exclude = []
-        for exec_plan in ExecutionPlan.new_instances:
+        for exec_plan in self.DataHandler.ExecutionPlans:
             if exec_plan.ItemRelated.Process == "ROD":
                 exec_plan_found = any(
-                    exec_plan.id == op[1].id for _, operations in self.InputData.RODSolution.items() for op_pair
+                    exec_plan.id == op[1].id for _, operations in self.DataHandler.RODSolution.items() for op_pair
                     in operations for op in (op_pair if isinstance(op_pair[0], list) else [op_pair]))
                 if not exec_plan_found:
-                    print(exec_plan.ItemRelated.Name, exec_plan.Machine, exec_plan.ItemRelated.Process)
+                    #print(exec_plan.ItemRelated.Name, exec_plan.Machine, exec_plan.ItemRelated.Process)
                     plans_to_exclude.append(exec_plan.id)
 
         for ep_id in plans_to_exclude:
-            ExecutionPlan.remove_by_id(ep_id)
+            self.DataHandler.removeEPbyID(ep_id)
 
     def objFun(self, solution):
         '''Calculate the objective function value for the given solution. Objective - Minimize tardiness'''
@@ -313,18 +328,19 @@ class RODPandS():
         for machine, operations in solution.items():
             if not operations:
                 continue
-            latest_ep_CoT = self.machineLatestEPCoTs[machine]
-            previous_CoT = previous_type = None
+            previous_plan_CoT = self.MachinePreviousPlanCoT[machine][1]
+            previous_type = next((item.MaterialType for item in self.DataHandler.Items if item.Name == self.MachinePreviousPlanCoT[machine][0]), None)
+            previous_item_CoT = None
             for op in operations:
-                Max_CoT = self.InputData.CurrentTime.replace(hour=0, minute=0, second=0, microsecond=0)
+                Max_CoT = self.DataHandler.CurrentTime.replace(hour=0, minute=0, second=0, microsecond=0)
                 ops = op if isinstance(op, list) else [op]
                 for op_n in ops:
                     if op_n in self.Operations:
                         data = self.Operations[op_n]
                         current_type = self.getMaterialType(data.ItemRelated.Name)
                         CT = self.getCycleTime(machine, data.ItemRelated.Name) * data.Quantity
-                        setup_time = self.getSetupTime(previous_type, current_type)
-                        self.getSTandCoT(data, CT, latest_ep_CoT, previous_CoT, setup_time)
+                        setup_time = self.getSetupTime(previous_type, current_type) if previous_type != current_type else 0.0
+                        self.getSTandCoT(data, CT, previous_plan_CoT, previous_item_CoT, setup_time)
                         DD = data.ProductionOrder.DD
                         Tardiness = max(data.CoT - DD, timedelta(0))
                         Max_CoT = max(Max_CoT, data.CoT)
@@ -332,15 +348,15 @@ class RODPandS():
                         objfun_value += (Tardiness.total_seconds() / 60)
                         previous_type = current_type
                 # objfun_value += ((Max_CoT - machine_ST).total_seconds() / 60)
-                previous_CoT = Max_CoT
+                previous_item_CoT = Max_CoT
 
         return objfun_value
 
 
 class TrefPandS():
-    def __init__(self, InputData):
-        self.InputData = InputData
-        self.Machines, self.TorcItems, self.TrefItems = self.InputData.TrefMachines, self.InputData.TorcItems, self.InputData.TrefItems
+    def __init__(self, DataHandler):
+        self.DataHandler = DataHandler
+        self.Machines, self.TorcItems, self.TrefItems = self.DataHandler.TrefMachines, self.DataHandler.TorcItems, self.DataHandler.TrefItems
 
     def combineItems(self, combination):
         combined_weights, combined_values, weights_names, weights_PO, exec_plan_ids, type_list = [], [], [], [], [], []
@@ -375,7 +391,7 @@ class TrefPandS():
         #print("Tref Time: ", et-st)
 
         plans_to_exclude = []
-        for exec_plan in ExecutionPlan.new_instances:
+        for exec_plan in self.DataHandler.ExecutionPlans:
             exec_plan_found = False
             for solutions in best_solutions:
                 for solution in solutions:
@@ -389,15 +405,16 @@ class TrefPandS():
                 plans_to_exclude.append(exec_plan.id)
 
         for ep_id in plans_to_exclude:
-            ExecutionPlan.remove_by_id(ep_id)
+            self.DataHandler.removeEPbyID(ep_id)
 
         for solutions in best_solutions:
             for _, solution in enumerate(solutions):
                 for machine in self.Machines:
                     TUCount = 0
                     if solution["individual_weights_POs"][machine.MachineCode]:
-                        timeUnit = TimeUnit(machine.MachineCode)
-                        for exec_plan in ExecutionPlan.new_instances:
+                        timeUnit = TimeUnit(machine.MachineCode, self.DataHandler.Database)
+                        self.DataHandler.TimeUnits.append(timeUnit)
+                        for exec_plan in self.DataHandler.ExecutionPlans:
                             for exec_plan_id in solution["allocated_exec_plans"][machine.MachineCode]:
                                 if exec_plan.id == exec_plan_id:
                                     timeUnit.ExecutionPlans.append(exec_plan)
@@ -411,9 +428,9 @@ class TrefPandS():
             sort_criteria = []
 
             # Append sort criteria based on the enabled criteria
-            if self.InputData.Criteria[2]:
+            if self.DataHandler.Criteria[2]:
                 # Check if the we should organize the Time Units in ascending or descending order according to the average diameter
-                with pyodbc.connect(self.InputData.ConnectionString) as conn:
+                with pyodbc.connect(self.DataHandler.ConnectionString) as conn:
                     with conn.cursor() as cursor:
                         # Query to get the ExecutionPlan with the biggest CompletionTime for the machine
                         cursor.execute("""
@@ -428,23 +445,23 @@ class TrefPandS():
 
                 max_dia = min_dia = None
                 if execution_plan:
-                    diameters = [Items.get_Item(TU_exec_plan.ItemRelated.Name).Diameter
+                    diameters = [Items.get_Item(TU_exec_plan.ItemRelated.Name, self.DataHandler.Database).Diameter
                                  for TU in TU_list for TU_exec_plan in TU.ExecutionPlans]
 
                     max_dia, min_dia = max(diameters), min(diameters)
-                    last_item_dia = Items.get_Item(execution_plan).Diameter
+                    last_item_dia = Items.get_Item(execution_plan, self.DataHandler.Database).Diameter
 
                     if min_dia < last_item_dia < max_dia:
-                        sort_criteria.append(lambda x: -x.get_average_diameter()
+                        sort_criteria.append(lambda x: -x.get_average_diameter(self.DataHandler.Database)
                         if (max_dia - last_item_dia) < (last_item_dia - min_dia)
-                        else x.get_average_diameter())
+                        else x.get_average_diameter(self.DataHandler.Database))
                     else:
                         sort_criteria.append(lambda
-                                                 x: -x.get_average_diameter() if last_item_dia > max_dia or last_item_dia == max_dia else x.get_average_diameter())
+                                                 x: -x.get_average_diameter(self.DataHandler.Database) if last_item_dia > max_dia or last_item_dia == max_dia else x.get_average_diameter(self.DataHandler.Database))
                 else:
-                    sort_criteria.append(lambda x: -x.get_average_diameter())
+                    sort_criteria.append(lambda x: -x.get_average_diameter(self.DataHandler.Database))
 
-            if self.InputData.Criteria[4]:
+            if self.DataHandler.Criteria[4]:
                 sort_criteria.append(lambda x: x.get_primary_material_type())
             # Add average due date as a primary sorting criterion
             sort_criteria.append(lambda x: x.calculate_average_due_date())
@@ -461,7 +478,7 @@ class TrefPandS():
                 if TU_exec_plan.id in exec_plan_dict:
                     exec_plan = exec_plan_dict[TU_exec_plan.id]
                     CT = next(
-                        (routing.CycleTime for routing in Routings.instances
+                        (routing.CycleTime for routing in self.DataHandler.Routings
                          if routing.Item == exec_plan.ItemRelated.Name and routing.Machine == TU.Machine),
                         None)
                     CT = (CT / 1000) * exec_plan.Quantity
@@ -473,7 +490,7 @@ class TrefPandS():
             ST_TU, item_count_dict = {}, {}
             # Extract initial CoT for the first time unit in each machine
             for machine in self.Machines:
-                TU_list = [tu for tu in TimeUnit.new_instances if machine.MachineCode == tu.Machine]
+                TU_list = [tu for tu in self.DataHandler.TimeUnits if machine.MachineCode == tu.Machine]
                 if not TU_list:
                     continue
 
@@ -482,12 +499,12 @@ class TrefPandS():
                 ROD_items = {}
                 for TU_exec_plan in sorted_tu_list[0].ExecutionPlans:
                     qty = TU_exec_plan.ItemRelated.Input
-                    for bom in BoM.instances:
+                    for bom in self.DataHandler.BoMs:
                         if bom.ItemRoot == TU_exec_plan.ItemRelated.Name:
                             for BoM_Item in bom.BoMItems:
                                 ROD_items[BoM_Item.ItemRelated] = ROD_items.get(BoM_Item.ItemRelated, 0) + qty
 
-                Max_CoT, item_count, current_count = self.calculateTrefST(ROD_items, [], {}, self.InputData)
+                Max_CoT, item_count, current_count = self.calculateTrefST(ROD_items, [], {}, self.DataHandler)
                 if item_count:
                     ST_TU[machine.MachineCode] = [Max_CoT, item_count, current_count]
                 item_count_dict[machine.MachineCode] = item_count
@@ -503,7 +520,7 @@ class TrefPandS():
 
                 # Update CoT_TU for the remaining machines
                 for machine in list(ST_TU.keys()):
-                    TU_list = [tu for tu in TimeUnit.new_instances if machine == tu.Machine]
+                    TU_list = [tu for tu in self.DataHandler.TimeUnits if machine == tu.Machine]
                     if not TU_list:
                         continue
 
@@ -511,7 +528,7 @@ class TrefPandS():
                     ROD_items = {}
                     for TU_exec_plan in sorted_tu_list[0].ExecutionPlans:
                         qty = TU_exec_plan.ItemRelated.Input
-                        for bom in BoM.instances:
+                        for bom in self.DataHandler.BoMs:
                             if bom.ItemRoot == TU_exec_plan.ItemRelated.Name:
                                 for BoM_Item in bom.BoMItems:
                                     ROD_items[BoM_Item.ItemRelated] = ROD_items.get(BoM_Item.ItemRelated, 0) + qty
@@ -520,42 +537,42 @@ class TrefPandS():
                         ROD_items,
                         item_count_dict.get(machine, []),
                         copy.deepcopy(previous_count),
-                        self.InputData
+                        self.DataHandler
                     )
                     ST_TU[machine] = [Max_CoT, updated_item_count, current_count]
                     item_count_dict[machine] = updated_item_count
 
             for machine, start_time in order:
-                TU_list = [tu for tu in TimeUnit.new_instances if machine == tu.Machine]
+                TU_list = [tu for tu in self.DataHandler.TimeUnits if machine == tu.Machine]
                 previous_TU = None
                 sorted_tu_list = sort_time_units(TU_list, machine)
                 for TU in sorted_tu_list:
-                    TU.calculate_time(start_time, previous_TU, self.InputData.ConnectionString, self.InputData.CurrentTime)
+                    TU.calculate_time(start_time, previous_TU, self.DataHandler, self.DataHandler.CurrentTime)
                     previous_TU = TU
 
-            exec_plan_dict = {exec_plan.id: exec_plan for exec_plan in ExecutionPlan.new_instances}
-            for TU in TimeUnit.new_instances:
+            exec_plan_dict = {exec_plan.id: exec_plan for exec_plan in self.DataHandler.ExecutionPlans}
+            for TU in self.DataHandler.TimeUnits:
                 update_exec_plan(exec_plan_dict, TU)
         else:
             for machine in self.Machines:
-                TU_list = [tu for tu in TimeUnit.new_instances if machine.MachineCode == tu.Machine]
+                TU_list = [tu for tu in self.DataHandler.TimeUnits if machine.MachineCode == tu.Machine]
                 if not TU_list:
                     continue
 
                 previous_TU = None
                 sorted_tu_list = sort_time_units(TU_list, machine.MachineCode)
                 for TU in sorted_tu_list:
-                    TU.calculate_time(None, previous_TU, self.InputData.ConnectionString, self.InputData.CurrentTime)
+                    TU.calculate_time(None, previous_TU, self.DataHandler, self.DataHandler.CurrentTime)
                     previous_TU = TU
 
-            exec_plan_dict = {exec_plan.id: exec_plan for exec_plan in ExecutionPlan.new_instances}
-            for TU in TimeUnit.new_instances:
+            exec_plan_dict = {exec_plan.id: exec_plan for exec_plan in self.DataHandler.ExecutionPlans}
+            for TU in self.DataHandler.TimeUnits:
                 update_exec_plan(exec_plan_dict, TU)
 
     def calculateTrefST(self, ROD_items, item_count, current_count, input_data):
-        Max_CoT = self.InputData.CurrentTime.replace(hour=0, minute=0, second=0, microsecond=0)
+        Max_CoT = self.DataHandler.CurrentTime.replace(hour=0, minute=0, second=0, microsecond=0)
         item_count_aux = {}
-        for i, (item, qty) in enumerate(ROD_items.items()):
+        for _, (item, qty) in enumerate(ROD_items.items()):
             machines_with_item = {}
             # Identify machines that contain the item
             for x, (mach_name, operations) in enumerate(input_data.RODSolution.items()):
@@ -564,14 +581,14 @@ class TrefPandS():
                         for op in op_pair:
                             if op[1].ItemRelated.Name == item:
                                 if mach_name not in machines_with_item:
-                                    mach = next((m for m in Machines.instances if m.MachineCode == mach_name), None)
+                                    mach = next((m for m in self.DataHandler.Machines if m.MachineCode == mach_name), None)
                                     if mach:
                                         machines_with_item[mach] = x
                                         break
                     else:
                         if op_pair[1].ItemRelated.Name == item:
                             if mach_name not in machines_with_item:
-                                mach = next((m for m in Machines.instances if m.MachineCode == mach_name), None)
+                                mach = next((m for m in self.DataHandler.Machines if m.MachineCode == mach_name), None)
                                 if mach:
                                     machines_with_item[mach] = x
                                     break
@@ -585,20 +602,20 @@ class TrefPandS():
                 for idx in range(remaining_qty):
                     temp_results[idx % len(temp_results)] += 1
 
-                results = [0] * len(self.InputData.RODMachines)
+                results = [0] * len(self.DataHandler.RODMachines)
                 for idx, mach_name in enumerate(machines_with_item.values()):
                     results[mach_name] = temp_results[idx]
 
                 item_count_aux[item] = results
-                current_count[item] = [0] * len(self.InputData.RODMachines)
+                current_count[item] = [0] * len(self.DataHandler.RODMachines)
             else:
-                for ROD_item in Items.instances:
+                for ROD_item in self.DataHandler.Items:
                     if item == ROD_item.Name:
-                        current_counts = item_count.get(item, [0] * len(self.InputData.RODMachines))
+                        current_counts = item_count.get(item, [0] * len(self.DataHandler.RODMachines))
                         item_count_aux[item] = [y for x, y in enumerate(current_counts)]
 
             for j, (mach, operations) in enumerate(input_data.RODSolution.items()):
-                iter = current_count.get(item, [0] * len(self.InputData.RODMachines))[j]
+                iter = current_count.get(item, [0] * len(self.DataHandler.RODMachines))[j]
                 count = 0
                 while count < item_count_aux[item][j]:
                     if iter >= len(operations):
@@ -624,14 +641,14 @@ class TrefPandS():
         max_no_improvement = 1000  # Stop after 1000 iterations without improvement within a batch
 
         # Sort production orders by due date
-        sorted_prod_orders = sorted(ProductionOrder.instances, key=lambda po: po.DD)
+        sorted_prod_orders = sorted(self.DataHandler.ProductionOrders, key=lambda po: po.DD)
 
         # Initialize prod_exec_plans as a dictionary
         prod_exec_plans = {}
 
         for prod_order in sorted_prod_orders:
             # Filter execution plans by production order ID and exclude BUN process
-            filtered_plans = [ep for ep in ExecutionPlan.new_instances if
+            filtered_plans = [ep for ep in self.DataHandler.ExecutionPlans if
                               ep.ProductionOrder.id == prod_order.id and ep.ItemRelated.Process != "BUN"]
 
             # Sort filtered plans by ItemRoot.Name for grouping
@@ -778,7 +795,7 @@ class TrefPandS():
 
             all_items = [exec_plan.ItemRelated.Name for exec_plan in priority_exec_plans]
             cycle_times, item_weights = get_CTs_and_Weights_cache(
-                all_items, Routings.instances, data["bins"], data["all_bins"]
+                all_items, self.DataHandler.Routings, data["bins"], data["all_bins"]
             )
 
             while priority_exec_plans:
@@ -915,7 +932,7 @@ class TrefPandS():
         all_items = [exec_plan.ItemRelated.Name for exec_plan in combination]
         # Precompute and cache cycle_times and item_weights for reuse
         cycle_times, item_weights = get_CTs_and_Weights_cache(
-            all_items, Routings.instances, data["bins"], data["all_bins"]
+            all_items, self.DataHandler.Routings, data["bins"], data["all_bins"]
         )
 
         machine_completion_times = {machine.MachineCode: 0 for machine in self.Machines}
@@ -1079,9 +1096,9 @@ class TrefPandS():
                     x[item, mach] = solver.BoolVar(f"x_{item}_{mach}")
                     weight = item_weights[data["weights_name"][item]][mach]  # Direct lookup
                     # coeff = data["weights"][item] - ((cycle_times[data["weights_name"][item]][mach] * 100) / weight) \
-                    #    if self.InputData.Criteria[1] else weight
+                    #    if self.DataHandler.Criteria[1] else weight
                     coeff = (weight / (cycle_times[data["weights_name"][item]][mach] * 100)) * data["weights"][item] \
-                        if self.InputData.Criteria[1] else weight
+                        if self.DataHandler.Criteria[1] else weight
                     objective.SetCoefficient(x[item, mach], coeff)
                 else:
                     continue
@@ -1125,12 +1142,12 @@ class TrefPandS():
         return None
 
 class TorcPandS():
-    def __init__(self, InputData):
-        self.InputData = InputData
-        self.Machines, self.TorcItems, self.TrefItems = self.InputData.TorcMachines, self.InputData.TorcItems, self.InputData.TrefItems
+    def __init__(self, DataHandler):
+        self.DataHandler = DataHandler
+        self.Machines, self.TorcItems, self.TrefItems = self.DataHandler.TorcMachines, self.DataHandler.TorcItems, self.DataHandler.TrefItems
         self.SetupTimesCache, self.CycleTimesCache, self.MaterialTypeCache, self.RoutingCache = (
             self.cacheSetupTimes(), self.cacheCycleTimes(), self.cacheMaterialTypes(), self.cacheRoutings())
-        self.MachineLatestEPCoT, self.MachineObjFun = {}, {}
+        self.MachinePreviousPlanCoT, self.MachineObjFun = {}, {}
         self.InitialSolution, self.Operations = self.generateInitialSolution()
         self.Check = False
         self.simulatedAnnealing()
@@ -1138,11 +1155,11 @@ class TorcPandS():
     def cacheSetupTimes(self):
         """Cache setup times as a dictionary for faster lookups."""
         return {(instance.FromMaterial, instance.ToMaterial): float(instance.SetupTime) for instance in
-                SetupTimesByMaterial.instances}
+                self.DataHandler.SetupTimesByMaterial}
 
     def cacheCycleTimes(self):
         """Cache cycle times as a dictionary for faster lookups."""
-        return {(routing.Machine, routing.Item): routing.CycleTime / 1000 for routing in Routings.instances}
+        return {(routing.Machine, routing.Item): routing.CycleTime / 1000 for routing in self.DataHandler.Routings}
 
     def cacheMaterialTypes(self):
         """Cache material types as a dictionary for faster lookups."""
@@ -1150,7 +1167,7 @@ class TorcPandS():
 
     def cacheRoutings(self):
         routings_cache = {}
-        for routing in Routings.instances:
+        for routing in self.DataHandler.Routings:
             if routing.Item not in routings_cache:
                 routings_cache[routing.Item] = []
             for machine in self.Machines:
@@ -1166,43 +1183,69 @@ class TorcPandS():
 
     def getMaterialType(self, item_name):
         return self.MaterialTypeCache.get(item_name, None)
+    
+    def nextShiftStartTime(self, current_time, shift_start_times):
+        for shift_start in shift_start_times:
+            shift_start_dt = datetime.combine(current_time.date(), shift_start)
+            if current_time < shift_start_dt:
+                return shift_start_dt
+        return datetime.combine(current_time.date() + timedelta(days=1), shift_start_times[0])
 
-    def getLatestEPCoT(self, machine):
+    def getPreviousPlanCoT(self, machine):
         """Get the Completion Time of the latest Execution Plan in the current machine"""
-        with pyodbc.connect(self.InputData.ConnectionString) as conn:
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT COUNT(*) FROM ExecutionPlans")
-                row_count = cursor.fetchone()[0]
-                if row_count != 0:
-                    cursor.execute(
-                        "SELECT MAX(ep.CompletionTime) AS MaxCompletionTime "
-                        "FROM ExecutionPlans ep "
-                        "JOIN Items i ON ep.Item COLLATE SQL_Latin1_General_CP1_CI_AS = i.Item "
-                        "WHERE i.Process = 'BUN' and ep.Machine = ?", (machine,)
-                    )
-                    latest_ep_CoT = cursor.fetchone()[0]
-                else:
-                    latest_ep_CoT = None
+        shift_start_times = [time(0, 0), time(8, 0), time(16, 0)]
 
-        return latest_ep_CoT
+        with pyodbc.connect(self.DataHandler.ConnectionString) as conn, conn.cursor() as cursor:
+            # Get latest execution plan for the machine
+            cursor.execute(
+                """SELECT TOP 1 ep.Item, ep.CompletionTime 
+                   FROM ExecutionPlans ep 
+                   JOIN Items i ON ep.Item COLLATE SQL_Latin1_General_CP1_CI_AS = i.Item 
+                   WHERE i.Process = 'BUN' AND ep.Machine = ? 
+                   ORDER BY CompletionTime DESC""", 
+                (machine,)
+            )
+            result = cursor.fetchone()
+            latest_ep_item, previous_plan_CoT = result if result else (None, None)
+        
+        # Determine start time
+        start_time = max(previous_plan_CoT, self.DataHandler.CurrentTime) if previous_plan_CoT else self.DataHandler.CurrentTime
+            
+        return [latest_ep_item, self.nextShiftStartTime(start_time, shift_start_times)]
+
+        # Determine previous material type
+        previous_type = next((item.MaterialType for item in self.DataHandler.Items if item.Name == latest_ep_item), None)
+
+        # Determine initial start time
+        start_time = max(previous_plan_CoT, self.DataHandler.CurrentTime) if previous_plan_CoT else self.DataHandler.CurrentTime
+
+        # Check if setup time is needed
+        current_type = self.ExecutionPlans[0].ItemRelated.MaterialType
+        if current_type != previous_type:
+            setup_time = next(
+                (float(instance.SetupTime) for instance in self.DataHandler.SetupTimesByMaterial
+                 if instance.FromMaterial == previous_type and instance.ToMaterial == current_type), 0.0)
+            start_time += timedelta(hours=setup_time)
+
+        return self.nextShiftStartTime(start_time, shift_start_times)
 
     def getBoMItems(self, bom_id):
-        return [[item.ItemRelated, item.Quantity] for bom in BoM.instances if bom.id == bom_id for item in bom.BoMItems]
+        return [[item.ItemRelated, item.Quantity] for bom in self.DataHandler.BoMs if bom.id == bom_id for item in bom.BoMItems]
 
-    def getItemST(self, ep, latest_ep_CoT, previous_CoT, used_eps, tref_item_CoT, update_STs):
+    def getItemST(self, ep, previous_plan_CoT, previous_item_CoT, used_eps, tref_item_CoT, update_STs):
         tref_latest_CoT = datetime.min
         prod_order_id = ep.ProductionOrder.id
         if update_STs:
-            bom_id = next(exec_plan.BoMId for exec_plan in ExecutionPlan.new_instances if exec_plan.ItemRoot
+            bom_id = next(exec_plan.BoMId for exec_plan in self.DataHandler.ExecutionPlans if exec_plan.ItemRoot
                           and exec_plan.ItemRoot.Name == ep.ItemRelated.Name and exec_plan.ProductionOrder.id == ep.ProductionOrder.id)
             bom_items = self.getBoMItems(bom_id)
 
             for item, quantity in bom_items:
-                if Items.get_Item(item).Process == "BUN":
+                if Items.get_Item(item, self.DataHandler.Database).Process == "BUN":
                     break
                 for _ in range(quantity):
                     # Filter eligible execution plans with CoT greater than tref_item_CoT[item] if it exists
-                    eligible_eps = [exec_plan for exec_plan in ExecutionPlan.new_instances
+                    eligible_eps = [exec_plan for exec_plan in self.DataHandler.ExecutionPlans
                                     if prod_order_id == exec_plan.ProductionOrder.id
                                     and item == exec_plan.ItemRelated.Name
                                     and exec_plan.id not in used_eps
@@ -1211,7 +1254,7 @@ class TorcPandS():
                     # Select the eligible plan with the minimum CoT that meets the required condition
                     if eligible_eps:
                         min_ep = min(eligible_eps, key=lambda x: x.CoT)
-                        if min_ep.CoT > max(latest_ep_CoT or datetime.min, previous_CoT or datetime.min):
+                        if min_ep.CoT > max(previous_plan_CoT or datetime.min, previous_item_CoT or datetime.min):
                             used_eps.append(min_ep.id)
                             tref_item_CoT[item] = min_ep.CoT
                             tref_latest_CoT = max(tref_latest_CoT or datetime.min, min_ep.CoT)
@@ -1219,26 +1262,26 @@ class TorcPandS():
                             break
         else:
             tref_latest_CoT = max(
-                (tu.CoT for tu in TimeUnit.new_instances for exec_plan in tu.ExecutionPlans
+                (tu.CoT for tu in self.DataHandler.TimeUnits for exec_plan in tu.ExecutionPlans
                  if prod_order_id == exec_plan.ProductionOrder.id),
-                default=self.InputData.CurrentTime.replace(hour=0, minute=0, second=0, microsecond=0)
+                default=self.DataHandler.CurrentTime.replace(hour=0, minute=0, second=0, microsecond=0)
             )
 
-        # Return tref_latest_CoT's CoT if it exists; otherwise, max of latest_ep_CoT and previous_CoT
+        # Return tref_latest_CoT's CoT if it exists; otherwise, max of previous_plan_CoT and previous_item_CoT
         return (
-            max(tref_latest_CoT, latest_ep_CoT or datetime.min, previous_CoT or datetime.min)), used_eps, tref_item_CoT
+            max(tref_latest_CoT, previous_plan_CoT or datetime.min, previous_item_CoT or datetime.min)), used_eps, tref_item_CoT
 
     def getSTandCoT(self, CT, ST, setup_time):
         ST += timedelta(hours=setup_time) + timedelta(minutes=(CT * 0.08))
         CoT = ST + timedelta(minutes=CT)
         return ST, CoT
 
-    def calculateTimes(self, machine, data, previous_CoT, previous_type, used_eps, tref_item_CoT, update_STs=False):
+    def calculateTimes(self, machine, data, previous_item_CoT, previous_type, used_eps, tref_item_CoT, update_STs=False):
         current_type = self.getMaterialType(data[0])
-        latest_ep_CoT = self.MachineLatestEPCoT[machine]
+        previous_plan_CoT = self.MachinePreviousPlanCoT[machine][1]
         CT = self.getCycleTime(machine, data[0]) * data[1].Quantity
-        setup_time = self.getSetupTime(previous_type, current_type)
-        ST, used_eps, tref_item_CoT = self.getItemST(data[1], latest_ep_CoT, previous_CoT, used_eps, tref_item_CoT,
+        setup_time = self.getSetupTime(previous_type, current_type) if previous_type != current_type else 0.0
+        ST, used_eps, tref_item_CoT = self.getItemST(data[1], previous_plan_CoT, previous_item_CoT, used_eps, tref_item_CoT,
                                                      update_STs)
         updated_ST, CoT = self.getSTandCoT(CT, ST, setup_time)
         return updated_ST, CoT, current_type, used_eps, tref_item_CoT
@@ -1247,13 +1290,13 @@ class TorcPandS():
         '''Generates a randomized initial solution.'''
 
         def get_possible_machines(exec_plan):
-            return [m for r in Routings.instances if r.Item == exec_plan.ItemRelated.Name
+            return [m for r in self.DataHandler.Routings if r.Item == exec_plan.ItemRelated.Name
                     for m in self.Machines if r.Machine == m.MachineCode]
 
         initial_solution = {machine.MachineCode: [] for machine in self.Machines}
-        special_case_items = [ep.ItemRoot.Name for ep in ExecutionPlan.new_instances if
+        special_case_items = [ep.ItemRoot.Name for ep in self.DataHandler.ExecutionPlans if
                               ep.ItemRoot and ep.ItemRelated.Process == "BUN"]
-        exec_plans = [ep for ep in ExecutionPlan.new_instances if ep.ItemRelated.Process == "BUN" and ep.ItemRelated.Name
+        exec_plans = [ep for ep in self.DataHandler.ExecutionPlans if ep.ItemRelated.Process == "BUN" and ep.ItemRelated.Name
                       not in special_case_items]
         sorted_exec_plans = sorted(exec_plans, key=lambda x: x.ProductionOrder.DD)
         sorted_exec_plans.reverse()
@@ -1269,7 +1312,7 @@ class TorcPandS():
             product_batches[product_key].append(op_number)
             #print(op_number)
                 
-        if self.InputData.Database == 'COFACTORY_GR':
+        if self.DataHandler.Database == 'COFACTORY_GR':
             max_ct = 0
             for product_key, operation_numbers in product_batches.items():
                 for op_number in operation_numbers:
@@ -1341,21 +1384,22 @@ class TorcPandS():
                         # Add the current exec_plan to the selected machine's schedule
                         initial_solution[machine_name].append(
                             (op_number, [exec_plan.ItemRelated.Name, exec_plan, 0, 0]))
+                        
+        self.MachinePreviousPlanCoT = {machine: self.getPreviousPlanCoT(machine) or None for machine in initial_solution}
 
         for machine, ops in initial_solution.items():
             used_eps = []
             tref_item_CoT = {}
-            latest_ep_CoT = self.getLatestEPCoT(machine)
-            self.MachineLatestEPCoT[machine] = latest_ep_CoT if latest_ep_CoT else None
-            previous_CoT = previous_type = None
+            previous_type = next((item.MaterialType for item in self.DataHandler.Items if item.Name == self.MachinePreviousPlanCoT[machine][0]), None)
+            previous_item_CoT = None
             for op, data in ops:
-                ST, CoT, current_type, used_eps, tref_item_CoT = self.calculateTimes(machine, data, previous_CoT,
+                ST, CoT, current_type, used_eps, tref_item_CoT = self.calculateTimes(machine, data, previous_item_CoT,
                                                                                      previous_type, used_eps,
                                                                                      tref_item_CoT)
                 # Ensure valid start and completion times
                 data[2], data[3] = ST, CoT
-                previous_CoT, previous_type = CoT, current_type
-
+                previous_item_CoT, previous_type = CoT, current_type
+                
         return initial_solution, operations
 
     def objFun(self, solution, updated_machines=None):
@@ -1369,12 +1413,13 @@ class TorcPandS():
             if not operations:
                 return 0, 0
 
-            previous_CoT = previous_type = last_item_name = None
+            previous_type = next((item.MaterialType for item in self.DataHandler.Items if item.Name == self.MachinePreviousPlanCoT[machine][0]), None)
+            previous_item_CoT = last_item_name = None
 
             for _, (_, data) in enumerate(operations):
                 current_item_name = data[1].ItemRelated.Name
                 ST, CoT, current_type, used_eps, tref_item_CoT = self.calculateTimes(
-                    machine, data, previous_CoT, previous_type, used_eps, tref_item_CoT
+                    machine, data, previous_item_CoT, previous_type, used_eps, tref_item_CoT
                 )
 
                 # Minimizing Tardiness
@@ -1402,7 +1447,7 @@ class TorcPandS():
 
                 data[2], data[3] = ST, CoT
                 last_item_name = current_item_name
-                previous_CoT, previous_type = CoT, current_type
+                previous_item_CoT, previous_type = CoT, current_type
 
             return tardiness_value, early_completion_value
 
@@ -1591,7 +1636,7 @@ class TorcPandS():
         # Calculate max CoT for each machine and sort best_solution
         machine_max_CoT = {
             machine: max((data[3] for _, data in ops),
-                         default=self.InputData.CurrentTime.replace(hour=0, minute=0, second=0, microsecond=0))
+                         default=self.DataHandler.CurrentTime.replace(hour=0, minute=0, second=0, microsecond=0))
             for machine, ops in best_solution.items()
         }
         best_solution = dict(sorted(best_solution.items(), key=lambda x: machine_max_CoT[x[0]]))
@@ -1601,19 +1646,20 @@ class TorcPandS():
             if not ops:
                 continue
             tref_item_CoT = {}
-            previous_CoT = previous_type = None
+            previous_type = next((item.MaterialType for item in self.DataHandler.Items if item.Name == self.MachinePreviousPlanCoT[machine][0]), None)
+            previous_item_CoT = None
             for _, data in ops:
-                ST, CoT, current_type, used_eps, tref_item_CoT = self.calculateTimes(machine, data, previous_CoT,
+                ST, CoT, current_type, used_eps, tref_item_CoT = self.calculateTimes(machine, data, previous_item_CoT,
                                                                                      previous_type, used_eps,
                                                                                      tref_item_CoT,
                                                                                      update_STs=True)
                 # Ensure valid start and completion times
                 data[2], data[3] = ST, CoT
-                previous_CoT, previous_type = CoT, current_type
+                previous_item_CoT, previous_type = CoT, current_type
 
-        special_case = [ep.ItemRoot.Name for ep in ExecutionPlan.new_instances if
+        special_case = [ep.ItemRoot.Name for ep in self.DataHandler.ExecutionPlans if
                         ep.ItemRoot and ep.ItemRelated.Process == "BUN"]
-        special_case_eps = [ep for ep in ExecutionPlan.new_instances if
+        special_case_eps = [ep for ep in self.DataHandler.ExecutionPlans if
                             ep.ItemRelated.Process == "BUN" and ep.ItemRelated.Name
                             in special_case]
         
@@ -1625,7 +1671,7 @@ class TorcPandS():
                 routings = self.RoutingCache[sc_ep.ItemRelated.Name]
 
                 bom_id = next(
-                    (exec_plan.BoMId for exec_plan in ExecutionPlan.new_instances
+                    (exec_plan.BoMId for exec_plan in self.DataHandler.ExecutionPlans
                      if exec_plan.ItemRoot and exec_plan.ItemRoot.Name == sc_ep.ItemRelated.Name
                      and exec_plan.ProductionOrder.id == sc_ep.ProductionOrder.id),
                     None
@@ -1690,10 +1736,11 @@ class TorcPandS():
                 if not ops:
                     continue
                 tref_item_CoT = {}
-                previous_CoT = previous_type = None
+                previous_type = next((item.MaterialType for item in self.DataHandler.Items if item.Name == self.MachinePreviousPlanCoT[machine][0]), None)
+                previous_item_CoT = None
                 for _, data in ops:
                     CT = self.getCycleTime(machine, data[0]) * data[1].Quantity
-                    ST, CoT, current_type, used_eps, tref_item_CoT = self.calculateTimes(machine, data, previous_CoT,
+                    ST, CoT, current_type, used_eps, tref_item_CoT = self.calculateTimes(machine, data, previous_item_CoT,
                                                                                          previous_type, used_eps,
                                                                                          tref_item_CoT, update_STs=True)
 
@@ -1702,7 +1749,7 @@ class TorcPandS():
                         CoT = ST + timedelta(minutes=CT)
                     # Ensure valid start and completion times
                     data[2], data[3] = ST, CoT
-                    previous_CoT, previous_type = CoT, current_type
+                    previous_item_CoT, previous_type = CoT, current_type
                     
         printed_prod_orders = set()
         for machine, operations in best_solution.items():
@@ -1711,7 +1758,7 @@ class TorcPandS():
                 product_name, exec_plan, start_time, completion_time = details
 
                 exec_plan = next(
-                    (exec_plan_ for exec_plan_ in ExecutionPlan.new_instances if exec_plan_.id == exec_plan.id), None)
+                    (exec_plan_ for exec_plan_ in self.DataHandler.ExecutionPlans if exec_plan_.id == exec_plan.id), None)
 
                 # Update execution plan's timing and machine
                 exec_plan.ST = start_time
@@ -1719,7 +1766,7 @@ class TorcPandS():
                 exec_plan.Machine = machine
 
                 # Find the production order associated with this execution plan
-                prod_order = next((prod_order for prod_order in ProductionOrder.instances if
+                prod_order = next((prod_order for prod_order in self.DataHandler.ProductionOrders if
                                    prod_order.id == exec_plan.ProductionOrder.id), None)
 
                 # Update production order's completion time

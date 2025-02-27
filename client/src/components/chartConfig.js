@@ -119,16 +119,16 @@ export const getData = async () => {
   console.log('GanttChart getData()');
   const path = 'http://localhost:5001/getChartData';
   try {
-    const res = await axios.get(path);
+    const res = await axios.get(path, { withCredentials: true });
     exec_plans.value = res.data.exec_plans;
     machines.value = res.data.machines;
 
     machines.value.sort((a, b) => {
       const getTypeOrder = (type) => {
-        if (type.startsWith("ROD")) return 1;
-        if (type.startsWith("MDW")) return 2;
-        if (type.startsWith("BUN")) return 3;
-        return 4;
+        if (type.startsWith("ROD0")) return 1;
+        if (type.startsWith("MDW0")) return 2;
+        if (type.startsWith("BUN0")) return 3;
+        return 5;
       };
 
       const typeOrderA = getTypeOrder(a.name);
@@ -145,7 +145,7 @@ export const getData = async () => {
     });
 
     // Ensure the y-axis labels match the machine names
-    options.scales.y.labels = machines.value.map((machine, i) => machine.name);
+    options.scales.y.labels = machines.value.map((machine, _) => machine.name);
 
     data.datasets.splice(0, data.datasets.length); // Clear existing data
 

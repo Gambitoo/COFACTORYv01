@@ -78,7 +78,6 @@
 <script lang="ts">
 import { Bar } from 'vue-chartjs';
 import * as chartConfig from './chartConfig.js';
-import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome';
 
 import {
   Chart as ChartJS,
@@ -97,7 +96,7 @@ import { startOfWeek, endOfWeek, addWeeks, subWeeks } from 'date-fns'; // Import
 ChartJS.register(Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale, TimeScale, zoomPlugin);
 
 export default {
-  components: { Bar, FontAwesomeIcon },
+  components: { Bar },
   props: {
     isLoading: {
       type: Boolean,
@@ -349,7 +348,6 @@ button:hover {
   border-radius: 5px;
   padding: 5px 10px;
   box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
-  z-index: 1000;
 }
 
 .loading-spinner {

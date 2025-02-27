@@ -5,10 +5,13 @@
             <h2>Remover Máquinas</h2>
             <div class="checkbox-group">
                 <div class="scroll-container">
-                    <label v-for="(machine, index) in machines" :key="index">
-                        <input type="checkbox" :value="machine" v-model="selectedMachines" />
-                        {{ machine }}
-                    </label>
+                    <div v-for="(machines, process) in groupedMachines" :key="process">
+                        <h3 v-if="machines.length">{{ process }}</h3>
+                        <label v-for="(machine, index) in machines" :key="index">
+                            <input type="checkbox" :value="machine" v-model="selectedMachines" />
+                            {{ machine }}
+                        </label>
+                    </div>
                 </div>
             </div>
             <div class="modal-actions">
@@ -19,18 +22,43 @@
     </div>
 </template>
 
-
 <script>
 export default {
     props: {
-        machines: Array,
+        processes: Array,  // List of process names
+        machines: Array,   // List of machine names
     },
     data() {
         return {
             selectedMachines: [],
         };
     },
+    computed: {
+        groupedMachines() {
+            let grouped = {};
+            this.processes.forEach(process => {
+                grouped[process] = this.machines.filter(machine => 
+                    machine.startsWith(process) || this.belongsToSameProcess(machine, process));
+            });
+
+            Object.keys(grouped).forEach(key => {
+                if (grouped[key].length === 0) {
+                    delete grouped[key];
+                }
+            });
+
+            return grouped;
+        }
+    },
     methods: {
+        belongsToSameProcess(machine, process) {
+            // Machines starting with "BMC" also belong to "BUN"
+            const processMapping = {
+                "BMC0": "BUN0"
+            };
+
+            return processMapping[machine.substring(0, 4)] === process;
+        },
         confirm() {
             this.$emit("confirm", this.selectedMachines);
         },
