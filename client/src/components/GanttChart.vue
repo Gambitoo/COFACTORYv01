@@ -16,7 +16,7 @@
         @animationend="resetAnimation" aria-label="Filters">
         <font-awesome-icon icon="filter" />
       </button>
-      <div v-if="internalLoading" class="loading-tooltip">
+      <div v-if="isAlgorithmRunning" class="loading-tooltip">
         <div class="loading-spinner"></div>
         <p style="margin: 0;">A criar novo plano...</p>
       </div>
@@ -120,6 +120,7 @@ export default {
       showFilters: false,
       selectedMachineTypes: ['ROD', 'MDW', 'BUN'],
       isAnimating: null as any, // Tracks which button is being animated
+      isAlgorithmRunning: false,
     };
   },
   computed: {
@@ -130,7 +131,6 @@ export default {
   methods: {
     async fetchData() {
       try {
-        this.internalLoading = true; // Show loading spinner
         await chartConfig.getData();
         this.isDataLoaded = true;
 
@@ -144,8 +144,6 @@ export default {
         this.setWeekRange(today);
       } catch (error) {
         console.error('Error loading Gantt chart data:', error);
-      } finally {
-        this.internalLoading = false; // Hide spinner
       }
     },
     toggleFilters() {
@@ -284,7 +282,7 @@ export default {
     },
     isLoading: {
       handler(newVal) {
-        this.internalLoading = newVal; // Synchronize internal loading state with spinner
+        this.isAlgorithmRunning = newVal; // Synchronize internal loading state with spinner
       },
       immediate: true,
     },

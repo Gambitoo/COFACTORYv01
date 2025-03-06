@@ -13,7 +13,7 @@ def processExtrusionInput(dataHandler, file_name):
         product_name, qty, due_date, weight = row[:4]
         item = Items.get_Item(product_name, dataHandler.Database)
         if item:
-            prod_qty = float(dataHandler.checkStock(product_name, qty) if dataHandler.Criteria[3] else qty)
+            prod_qty = int(dataHandler.checkStock(product_name, qty) if dataHandler.Criteria[3] else qty)
             if prod_qty != 0:
                 prod_order = ProductionOrder(item, prod_qty, due_date, weight)
                 dataHandler.ProductionOrders.append(prod_order)

@@ -39,9 +39,9 @@
         <PlanHistoryPage v-if="showPlanHistory" @close="closePlanHistoryPage" />
     </div>
 
-    <div v-if="showBranchModal" class="modal-overlay">
+    <!--<div v-if="showBranchModal" class="modal-overlay">
         <BranchSelectionModal @confirm="handleBranchSelection" />
-    </div>
+    </div>-->
 </template>
 
 <script lang="ts">
@@ -51,11 +51,11 @@ import RemoveMachinesModal from "@/components/RemoveMachinesModal.vue";
 import RemoveBoMsModal from "@/components/RemoveBoMsModal.vue";
 import ResultsModal from "@/components/ResultsModal.vue";
 import MissingItemsModal from "@/components/MissingItemsModal.vue";
-import BranchSelectionModal from "@/components/BranchSelectionModal.vue";
+//import BranchSelectionModal from "@/components/BranchSelectionModal.vue";
 import PlanHistoryPage from "@/components/PlanHistoryPage.vue";
 
 export default {
-    components: { GanttChart, CriteriaModal, RemoveMachinesModal, RemoveBoMsModal, ResultsModal, MissingItemsModal, BranchSelectionModal, PlanHistoryPage },
+    components: { GanttChart, CriteriaModal, RemoveMachinesModal, RemoveBoMsModal, ResultsModal, MissingItemsModal, PlanHistoryPage },
     data() {
         return {
             userID: null as any,
@@ -82,15 +82,45 @@ export default {
             noBoms: [],
             renderKey: 0,
             menuOpen: false,
+            apiUrl: import.meta.env.VITE_FLASK_HOST 
+                ? `http://${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`
+                : 'http://localhost:5001',
         };
     },
     mounted() {
         window.addEventListener("beforeunload", this.handlePageUnload);
+
+        // Check for URL parameters
+        this.checkUrlParameters();
     },
     beforeDestroy() {
         window.removeEventListener("beforeunload", this.handlePageUnload);
     },
     methods: {
+        // New method to check URL parameters
+        checkUrlParameters() {
+            // Get URL search parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            
+            // Check for BRANCH and USER parameters
+            const branch = urlParams.get('BRANCH');
+            const userId = urlParams.get('USER');
+            
+            if (branch && userId) {
+                // Map BRANCH parameter to correct database name
+                let dbBranch;
+                if (branch === 'COFPT') {
+                    dbBranch = 'COFACTORY_PT';
+                } else if (branch === 'COFGR') {
+                    dbBranch = 'COFACTORY_GR';
+                }
+
+                this.selectBranchWithParams(dbBranch, userId);
+            } else {
+                console.error("Branch or userId missing in URL parameters.");
+            }
+            
+        },
         toggleMenu() {
             this.menuOpen = !this.menuOpen;
         },
@@ -103,9 +133,12 @@ export default {
             this.showPlanHistory = false;
             this.showGanttChart = true;
         },
-        async handleBranchSelection({branch, userId}) {
+        async selectBranchWithParams(branch, userId) {
+            console.log(this.apiUrl);
+            console.log(branch, userId);
+
             try {
-                const response = await fetch('http://localhost:5001/selectBranch', {
+                const response = await fetch(`${this.apiUrl}/selectBranch`, {
                     method: 'POST',
                     credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
@@ -171,7 +204,7 @@ export default {
                 const formData = new FormData();
                 formData.append("file", file);
 
-                const response = await fetch("http://localhost:5001/uploadInputFile", {
+                const response = await fetch(`${this.apiUrl}/uploadInputFile`, {
                     method: "POST",
                     credentials: 'include',
                     body: formData,
@@ -196,7 +229,7 @@ export default {
             console.log("Critérios:", selectedCriteria);
             this.criteriaSelected = true;
 
-            await fetch("http://localhost:5001/criteria", {
+            await fetch(`${this.apiUrl}/criteria`, {
                 method: "POST",
                 credentials: 'include',
                 headers: {
@@ -230,7 +263,10 @@ export default {
         },
         async fetchMachines() {
             try {
-                const response = await fetch("http://localhost:5001/machines");
+                const response = await fetch(`${this.apiUrl}/machines`, {
+                    method: 'GET',
+                    credentials: 'include',
+                });
                 const data = await response.json();
                 if (response.ok) {
                     this.availableMachines = data.machines.map(machine => machine.name);
@@ -244,7 +280,7 @@ export default {
         },
         async fetchBoMs() {
             try {
-                const response = await fetch("http://localhost:5001/BoMs", {
+                const response = await fetch(`${this.apiUrl}/BoMs`, {
                     method: 'GET',
                     credentials: 'include',
                 });
@@ -263,7 +299,7 @@ export default {
             this.showRemoveMachinesModal = false;
             this.machinesRemoved = true;
 
-            fetch("http://localhost:5001/removeMachines", {
+            fetch(`${this.apiUrl}/removeMachines`, {
                 method: "POST",
                 credentials: 'include',
                 headers: { "Content-Type": "application/json" },
@@ -292,7 +328,7 @@ export default {
             this.showRemoveBoMsModal = false;
             this.bomsRemoved = true;
 
-            fetch("http://localhost:5001/removeBoMs", {
+            fetch(`${this.apiUrl}/removeBoMs`, {
                 method: "POST",
                 credentials: 'include',
                 headers: { "Content-Type": "application/json" },
@@ -316,7 +352,7 @@ export default {
             console.log(isReady, this.selectedCriteria);
 
             if (isReady) {
-                fetch('http://localhost:5001/createData', {
+                fetch(`${this.apiUrl}/createData`, {
                     method: 'POST',
                     credentials: 'include',
                 })
@@ -335,36 +371,77 @@ export default {
                         }
 
                         this.isAlgorithmRunning = true;
-                        fetch('http://localhost:5001/runAlgorithm', {
+                        fetch(`${this.apiUrl}/runAlgorithm`, {
                             method: 'POST',
                             credentials: 'include',
                         })
+                            .then(response => response.json())
                             .then(() => {
-                                this.isAlgorithmRunning = false;
-                                this.showResultsModal = true;
+                                // Start polling for status
+                                this.pollAlgorithmStatus();
                             })
                             .catch((error) => {
-                                console.error("Error running the algorithm:", error);
+                                console.error("Erro na execução do algoritmo:", error);
+                                
+                                if (error && error.message) {
+                                    alert(error.message);
+                                } else {
+                                    alert("Ocorreu um erro na execução do algoritmo.");
+                                }
+
                                 this.isAlgorithmRunning = false;
                             });
                     })
                     .catch((error) => {
-                        console.error("Error getting the missing items:", error);
+                        console.error("Erro na obtenção dos itens não existentes:", error);
                     });
             }
+        },
+        pollAlgorithmStatus() {
+            const checkStatus = () => {
+                fetch(`${this.apiUrl}/algorithmStatus`, {
+                    credentials: 'include',
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'completed') {
+                        // Algorithm is done
+                        this.isAlgorithmRunning = false;
+                        this.showResultsModal = true;
+                    } else if (data.status === 'error' || data.status === 'aborted') {
+                        // Handle error
+                        this.isAlgorithmRunning = false;
+                        console.error("Algorithm failed:", data.message);
+                    } else if (data.status === 'running') {
+                        this.isAlgorithmRunning = true;
+                        // Still running, check again in 2 seconds
+                        setTimeout(checkStatus, 2000);
+                    } else {
+                        // Still running, check again in 2 seconds
+                        setTimeout(checkStatus, 2000);
+                    }
+                })
+                .catch(error => {
+                    console.error("Erro na verificação do estado do algoritmo:", error);
+                    this.isAlgorithmRunning = false;
+                });
+            };
+
+            // Start checking
+            checkStatus();
         },
         closeMissingItemsModal() {
             this.showMissingItemsModal = false;
         },
         handleResultsConfirm() {
             this.showResultsModal = false;
-            fetch("http://localhost:5001/saveResults", {
+            fetch(`${this.apiUrl}/saveResults`, {
                 method: 'POST',
                 credentials: 'include',
             })
                 .then(response => {
                     if (!response.ok) {
-                      throw new Error("Failed to download the files");
+                      throw new Error("Falha no download dos ficheiros.");
                     }
                     return response.blob();  // Convert response to blob
                 })
@@ -379,11 +456,11 @@ export default {
                     window.URL.revokeObjectURL(url);
                 })
                 .then((data) => {
-                    console.log("Results saved and new data:", data);
+                    console.log("Resultados guardados com sucesso:", data);
                     this.refreshGanttChart();
                 })
                 .catch((error) => {
-                    console.error("Error saving the results:", error);
+                    console.error("Erro no armazenamento dos resultados:", error);
                     alert("Erro no armazenamento do plano gerado. Por favor tente outra vez.")
                 });
         },
@@ -406,11 +483,11 @@ export default {
         async handlePageUnload(event: Event) {
             if (this.isAlgorithmRunning) {
                 try {
-                    const url = "http://localhost:5001/abortAlgorithm";
+                    const url = `${this.apiUrl}/abortAlgorithm`;
                     const data = new Blob([], { type: 'text/plain' });
                     navigator.sendBeacon(url, data);
                 } catch (error) {
-                    console.error("Error sending abort signal:", error);
+                    console.error("Erro no envio do sinal de termino do algoritmo:", error);
                 }
             }
             event.preventDefault();
@@ -419,7 +496,7 @@ export default {
             this.renderKey++; // Forces re-rendering of GanttChart
         },
         deleteFileRequest() {
-            fetch("http://localhost:5001/deleteInputFile", {
+            fetch(`${this.apiUrl}/deleteInputFile`, {
                 method: 'POST',
                 credentials: 'include',
             })
@@ -447,6 +524,7 @@ export default {
     color: white;
     padding: 10px 20px;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    margin-top: 50px;
 }
 
 .header h1 {

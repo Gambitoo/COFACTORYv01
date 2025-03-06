@@ -1,50 +1,66 @@
-import configparser
-from flask import Flask, jsonify, request, session, send_file
+from flask import Flask, jsonify, request, session, send_file, send_from_directory
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
 import os
 import pandas as pd
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
+import threading
+import uuid
+from concurrent.futures import ThreadPoolExecutor
 import time
 from io import BytesIO
 import zipfile
+from dotenv import load_dotenv
 from libraries.abort_utils import abort_event
 from libraries.utils import (Items, TimeUnit, ProductionOrder, ExecutionPlan, Machines, BoM, 
     BoMItem, DataHandler)
 from libraries.main_handler import executePandS, processExtrusionInput
 
-INPUT_FOLDER = 'Planos'
+# Load the .env file with environment variables
+load_dotenv('config.env')
+
+INPUT_FOLDER = os.environ.get('STORAGE_PATH')
 ALLOWED_EXTENSIONS = {'xlsx'}
 CLEANUP_INTERVAL = 30  # Run the temp cleanup every 30 minutes
 TEMP_FILES_LIFETIME = 3600  # Delete temp files older than 1 hour (3600 seconds)
-
-# Read the configuration file
-config = configparser.ConfigParser()
-config.read('config.ini')
-
-# Extract database configuration
-db_server = config['Database']['db_server']
-db_username = config['Database']['db_username']
-db_password = config['Database']['db_password']
-secret_key = config['Secret Key']['secret_key']
 
 # All existing criteria and specific user data
 all_criteria, user_data = None, {}
 
 # Instantiate the app
 app = Flask(__name__)
-app.config.update(UPLOAD_FOLDER=None, TEMP_FOLDER=None, SECRET_KEY=secret_key)
+
+# Set configuration from environment variables
+app.config.update(
+    SECRET_KEY=os.environ.get('SECRET_KEY'),
+    UPLOAD_FOLDER=None, 
+    TEMP_FOLDER=None,
+    HOST=os.environ.get('HOST', '0.0.0.0'),
+    PORT=os.environ.get('PORT', '5001')
+)
+
+# Create thread pool and tracking dictionaries
+executor = ThreadPoolExecutor(max_workers=5)
+running_algorithms = {}
 
 # Load data from both databases
-for db_name in ["COFACTORY_PT", "COFACTORY_GR"]:
-    connection_string = f'DRIVER={{SQL Server}};SERVER={db_server};DATABASE={db_name};UID={db_username};PWD={db_password};'
+connection_strings = {
+    "COFACTORY_PT": f'DRIVER={{SQL Server}};SERVER={os.environ.get("COFPT_DATABASE_SERVER")};'
+                    f'DATABASE=COFACTORY_PT;UID={os.environ.get("COFPT_DATABASE_USERNAME")};'
+                    f'PWD={os.environ.get("COFPT_DATABASE_PASSWORD")};',
+    
+    "COFACTORY_GR": f'DRIVER={{SQL Server}};SERVER={os.environ.get("COFGR_DATABASE_SERVER")};'
+                    f'DATABASE=COFACTORY_GR;UID={os.environ.get("COFGR_DATABASE_USERNAME")};'
+                    f'PWD={os.environ.get("COFGR_DATABASE_PASSWORD")};'
+}
+
+for db_name, connection_string in connection_strings.items():
     DataHandler.readDBData(connection_string, db_name)
 
 # Enable CORS
 CORS(app, resources={r'/*': {'origins': '*'}}, supports_credentials=True)
 
-# Create a SQL Server connection function
 def get_chart_data(database):
     exec_plan_instances = ExecutionPlan.GR_instances if database == "COFACTORY_GR" else ExecutionPlan.PT_instances
     time_unit_instances = TimeUnit.GR_instances if database == "COFACTORY_GR" else TimeUnit.PT_instances
@@ -173,6 +189,8 @@ async def select_branch():
     selected_branch = data.get('branch')
     user_id = data.get('userId')
     
+    global user_data
+    
     if not user_id:
         return jsonify({'status': 'error', 'message': 'User ID não fornecido.'}), 400
 
@@ -195,7 +213,7 @@ async def select_branch():
     if selected_branch != "COFACTORY_PT" and selected_branch != "COFACTORY_GR":
         return jsonify({'status': 'error', 'message': 'Unidade de produção inválida.'}), 400
     
-    connection_string = f'DRIVER={{SQL Server}};SERVER={db_server};DATABASE={selected_branch};UID={db_username};PWD={db_password};'
+    connection_string = connection_strings[selected_branch]
     # Generate the connection string, which contains the server, chosen database, and the username and password to access it
     user_data[user_id]["input_data"] = DataHandler(selected_branch, connection_string)
     
@@ -307,53 +325,12 @@ def upload_file():
         # Validate the input file data
         is_valid = validate_file(temp_file_path)
         if not is_valid:
+            os.remove(temp_file_path)
             return jsonify({'message': 'Ficheiro inválido, tente outra vez.'}), 400
         
         user_data[user_id]["input_file"] = temp_file_path
         dataHandler = user_data[user_id]["input_data"]
         dataHandler.CurrentTime = None
-        
-        """# Store the file temporarily
-        with tempfile.NamedTemporaryFile(delete=False) as temp_file:
-            file.save(temp_file)  # Save file content
-            temp_file_path = temp_file.name  # Store the path"""
-        
-        """# Extract the original file name without the extension
-        original_name, extension = os.path.splitext(file.filename)
-        
-        new_file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{original_name}_*.{extension.strip('.')}")
-
-        # Find existing files with a similar name in the upload folder
-        existing_files = glob.glob(new_file_path)
-        
-        # Extract the unique number from the existing files and determine the next ID
-        ID = 1
-        if existing_files:
-            # Extract numeric suffixes to determine the next ID
-            IDs = [
-                int(os.path.basename(file).split('_')[-1].split('.')[0])
-                for file in existing_files if file.split('_')[-1].split('.')[0].isdigit()
-            ]
-            if IDs:
-                ID = max(IDs) + 1
-
-        # Generate a new unique filename
-        new_filename = f"{original_name}_{ID}{extension}"
-        global input_file
-        new_file_path = os.path.join(app.config['UPLOAD_FOLDER'], new_filename)
-        input_file = new_file_path
-
-        # Ensure the upload folder exists, creating it if not, and save the file to the server
-        os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-        file.save(new_file_path)
-        
-        is_valid = validate_file(new_file_path)
-        if not is_valid:
-            os.remove(new_file_path)
-            return jsonify({'message': 'Ficheiro inválido.'}), 400
-
-        # Reset the current time, since we introduce a new input file 
-        current_time = None"""
 
         # Return success response with the file path
         return jsonify({'message': 'Ficheiro lido e guardado com sucesso.', 'file_path': temp_file_path}), 200
@@ -413,9 +390,10 @@ def get_machines():
 @app.route('/BoMs', methods=['GET'])
 def get_BoMs():
     user_id = session.get('user_id', None)
+    dataHandler = user_data[user_id]["input_data"]
     
     # Get the BoM's from the products in the inputted production orders
-    item_BoMs = DataHandler.getInputBoMs(user_data[user_id]["input_file"])
+    item_BoMs = dataHandler.getInputBoMs(user_data[user_id]["input_file"])
 
     return jsonify({'status': 'success', 'item_BoMs': item_BoMs})
 
@@ -465,36 +443,114 @@ def create_data():
         "no_routings": no_routings,
         "no_bom": no_bom,
     }), 200
+    
+def run_algorithm_in_thread(user_id, dataHandler, PT_Settings):
+    """Run the algorithm in a separate thread"""
+    try:
+        # Clear any abort flag
+        abort_event.clear()
+        
+        # Run the algorithm
+        success = executePandS(dataHandler, PT_Settings)
+        
+        # Update the algorithm status
+        running_algorithms[user_id]["status"] = "completed"
+        running_algorithms[user_id]["success"] = success
+        running_algorithms[user_id]["message"] = "Algoritmo executado com sucesso." if success else "A execução do algoritmo foi abortada."
+    except Exception as e:
+        import traceback
+        # Update status with error information
+        running_algorithms[user_id]["status"] = "error"
+        running_algorithms[user_id]["success"] = False
+        running_algorithms[user_id]["message"] = str(e)
+        running_algorithms[user_id]["traceback"] = traceback.format_exc()
+    finally:
+        # Keep the result for a while so the client can query it
+        def cleanup():
+            time.sleep(300)  # Keep results for 5 minutes
+            if user_id in running_algorithms:
+                del running_algorithms[user_id]
+                
+        threading.Thread(target=cleanup).start()
 
 @app.route('/runAlgorithm', methods=['POST'])
 def run_algorithm():
-    # If the COFACTORY_PT database is selected, the PT_Settings configuration will enable the execution of the ROD process.
-    user_id = session.get('user_id', None)
+    # Get the user ID from the session
+    user_id = session.get('user_id')
+    
+    # Check if the algorithm is already running for this user
+    if user_id in running_algorithms and running_algorithms[user_id]["status"] == "running":
+        return jsonify({
+            'status': 'already_running',
+            'message': 'O algoritmo já está em execução para este utilizador.'
+        }), 400
+        
+    # Check if the thread pool is full
+    if executor._work_queue.qsize() >= executor._max_workers:
+        return jsonify({
+            'status': 'pool_full',
+            'message': 'A execução do algoritmo está em capacidade máxima. Por favor, tente novamente mais tarde.'
+        }), 503  
+    
     dataHandler = user_data[user_id]["input_data"]
     
+    # Check if PT_Settings should be enabled
     PT_Settings = True if dataHandler.Database == "COFACTORY_PT" else False
+    
+    # Initialize the algorithm status
+    running_algorithms[user_id] = {
+        "id": str(uuid.uuid4()),
+        "status": "running",
+        "success": None,
+        "message": "Algoritmo em execução.",
+        "start_time": time.time()
+    }
+    
+    # Submit the algorithm to the thread pool
+    executor.submit(run_algorithm_in_thread, user_id, dataHandler, PT_Settings)
+    
+    return jsonify({
+        'status': 'success',
+        'message': 'Iniciada a execução do algoritmo.',
+        'task_id': running_algorithms[user_id]["id"]
+    }), 202 
 
-    # Run the algorithm, periodically checking for the abort flag.
-    abort_event.clear()
-    success = executePandS(dataHandler, PT_Settings)
-
-    if success:
-        return jsonify({"message": "Algoritmo executado com sucesso."}), 200 # A success message is returned, if the algorithm is executed successfully.
-    else:
-        return jsonify({"message": "A execução do algoritmo foi abortada."}), 200 # A error message is returned, if the algorithm is unexpectedly aborted.
+@app.route('/algorithmStatus', methods=['GET'])
+def algorithm_status():
+    # Get the user ID from the session
+    user_id = session.get('user_id')
+    
+    # Check if there's a task for this user
+    if user_id not in running_algorithms:
+        return jsonify({'status': 'not_found', 'message': 'Este utilizador não tem nenhum algoritmo em execução.'}), 404
+    
+    # Return the algorithm status
+    status = running_algorithms[user_id]
+    
+    return jsonify(status)
 
 @app.route('/abortAlgorithm', methods=['POST'])
 def abort_algorithm():
-    # Endpoint to set the abort flag.
-    abort_event.set()
-    return jsonify({"message": "Algoritmo interrompido."}), 200
+    # Get the user ID from the session
+    user_id = session.get('user_id')
+    
+    # Check if there's an algorithm running for this user
+    if user_id in running_algorithms and running_algorithms[user_id]["status"] == "running":
+        # Set the abort flag
+        abort_event.set()
+        
+        # Update the algorithm status
+        running_algorithms[user_id]["status"] = "aborted"
+        running_algorithms[user_id]["message"] = "Algorithm was aborted by user"
+        
+        return jsonify({'status': 'success', 'message': 'Algorithm aborted'}), 200
+    
+    # If we get here, either there's no algorithm for this user or it's already completed
+    return jsonify({'status': 'not_found', 'message': 'Não foi encontrado nenhum algoritmo em execução.'}), 404
 
 @app.route('/saveResults', methods=['POST'])
 def save_results():
-    user_id = session.get('user_id', None)
-    if not user_id or user_id not in user_data:
-        return jsonify({"error": "Utilizador não autenticado."}), 403
-    
+    user_id = session.get('user_id', None)    
     dataHandler = user_data[user_id]["input_data"]
     current_time = int(dataHandler.CurrentTime.strftime("%d%m%Y%H%M%S"))
     
@@ -529,13 +585,22 @@ def save_results():
     
     activated_criteria = [all_criteria[idx] for idx, activated in dataHandler.Criteria.items() if activated]
     with open(os.path.join(plan_folder, "criteria.txt"), "w") as f:
-        f.writelines(f"{criteria}\n" for criteria in activated_criteria)
+        for idx, criteria in enumerate(activated_criteria):
+            if idx == len(activated_criteria) - 1: # Check if it's the last element
+                f.write(f"{criteria}") # Don't add a comma after the last element
+            else:
+                f.write(f"{criteria}, ") # Add a comma after each element except the last one
     
-    zip_buffer = BytesIO()
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+    zip_file_path = os.path.join(plan_folder, "OUTPUT_Plans.zip")
+
+    # Create a ZIP archive for OUTPUT files
+    with zipfile.ZipFile(zip_file_path, "w", zipfile.ZIP_DEFLATED) as zipf:
         for filename, file_obj in file_names.items():
-            zip_file.writestr(filename, file_obj.getvalue())
+            zipf.writestr(filename, file_obj.getvalue())
             
+    # Read the ZIP file into memory for download
+    with open(zip_file_path, "rb") as f:
+        zip_buffer = BytesIO(f.read())
     zip_buffer.seek(0)
 
     if dataHandler.Database == "COFACTORY_GR":
@@ -548,21 +613,99 @@ def save_results():
     #return jsonify({"message": "Resultados guardados com sucesso."}), 200
     return send_file(zip_buffer, as_attachment=True, download_name='OUTPUT_Plans.zip', mimetype='application/zip')
 
+def get_ep_by_plano_id(database, plano_id):
+    exec_plan_instances = ExecutionPlan.GR_instances if database == "COFACTORY_GR" else ExecutionPlan.PT_instances
+
+    filtered_instances = [ep for ep in exec_plan_instances if ep.PlanoId == plano_id]
+
+    if not filtered_instances:
+        return []  # Return an empty list if no matching execution plans are found
+
+    min_ST = min(ep.ST for ep in filtered_instances)
+    max_CoT = max(ep.CoT for ep in filtered_instances)
+
+    return [min_ST, max_CoT]
+
 @app.route('/getPlanHistory', methods=['POST'])
 def plan_history():
-    # Get all plan folders in the user directory with their modification times
-    folders = [
-        (folder, os.path.getmtime(os.path.join(app.config['UPLOAD_FOLDER'], folder)))
-        for folder in os.listdir(app.config['UPLOAD_FOLDER'])
-        if os.path.isdir(os.path.join(app.config['UPLOAD_FOLDER'], folder))
+    user_id = session.get('user_id', None)
+    dataHandler = user_data[user_id]["input_data"]
+    
+    plan_history_list = []  # Store the final structured response
+    
+    user_folders = [
+        folder for folder in os.listdir(INPUT_FOLDER)
+        if os.path.isdir(os.path.join(INPUT_FOLDER, folder))
     ]
     
-    folders.sort(key=lambda x: x[1], reverse=True)
-
-    for folder, time in folders:
-        print(folder, time) 
+    for user_folder in user_folders:
+        user_folder_path = os.path.join(INPUT_FOLDER, user_folder)
         
-    return jsonify({"message": "Resultados guardados com sucesso."}), 200
+        # Get all plan folders in the user directory with their modification times
+        plan_folders = [
+            (folder, os.path.getmtime(os.path.join(user_folder_path, folder)))
+            for folder in os.listdir(user_folder_path)
+            if os.path.isdir(os.path.join(user_folder_path, folder)) and folder != "temp"
+        ]
+        
+        # Sort folders by modification time (latest first)
+        plan_folders.sort(key=lambda x: x[1], reverse=True)
+    
+        for path_folder, _ in plan_folders:
+            plan_folder_path = os.path.join(user_folder_path, path_folder)
+            
+            # Prepare lists for input files, output files, and criteria content
+            input_files = []
+            output_files = []
+            criteria_contents = []
+            
+            # Add the zipped file with the plans data to output files
+            zip_file_path = os.path.join(plan_folder_path, "OUTPUT_Plans.zip")
+            if os.path.exists(zip_file_path):
+                output_files.append(f"http://localhost:5001/download/{path_folder}/OUTPUT_Plans.zip")
+    
+            for file in os.listdir(plan_folder_path):
+                file_path = os.path.join(plan_folder_path, file)
+                
+                if os.path.isfile(file_path):
+                    file_url = f"http://localhost:5001/download/{path_folder}/{file}"
+                    
+                    # Categorize files
+                    if file.startswith("Plano"): # Input file used to create the plan
+                        input_files.append(file_url)
+                    elif file.startswith("criteria"): # File with chosen criteria
+                        try:
+                            with open(file_path, "r", encoding="utf-8") as criteria_file:
+                                criteria_contents.append(criteria_file.read())
+                        except UnicodeDecodeError:
+                            with open(file_path, "r", encoding="latin-1") as criteria_file:  # Try fallback encoding
+                                criteria_contents.append(criteria_file.read())
+            
+            # Get the plan's ST and CoT 
+            ST_and_CoT = get_ep_by_plano_id(dataHandler.Database, path_folder)
+            
+            # Append the structured data to the response list
+            plan_history_list.append({
+                "user_id": user_folder,
+                "folder": path_folder,
+                "inputFiles": input_files,
+                "outputFiles": output_files,
+                "ST": ST_and_CoT[0],
+                "CoT": ST_and_CoT[1],
+                "criteria": criteria_contents
+            })
+            
+    return jsonify(plan_history_list), 200
+
+@app.route('/download/<folder_name>/<filename>', methods=['GET'])
+def download_file(folder_name, filename):
+    """Serves files from the user's plan history folder."""
+    plan_folder = os.path.join(app.config['UPLOAD_FOLDER'], folder_name)
+    
+    if not os.path.exists(os.path.join(plan_folder, filename)):
+        return jsonify({"error": "Ficheiro não encontrado."}), 404
+
+    return send_from_directory(plan_folder, filename, as_attachment=True)
    
 if __name__ == '__main__':
     # Start the temp cleanup scheduler before running the app
@@ -571,7 +714,7 @@ if __name__ == '__main__':
     scheduler.start()
     
     try:
-        app.run(host= '0.0.0.0', port=5001, debug=False)
+        app.run(host=app.config["HOST"], port=app.config["PORT"], debug=False)
     except KeyboardInterrupt:
         scheduler.shutdown() # The scheduler is properly shut down if the app stops
         

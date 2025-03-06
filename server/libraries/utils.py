@@ -8,7 +8,7 @@ from openpyxl import Workbook, load_workbook
 class TimeUnit:
     id = 0
     GR_instances, PT_instances = [], []
-    def __init__(self, Machine, Database):
+    def __init__(self, Machine):
         TimeUnit.id += 1
         self.id = TimeUnit.id
         self.Name = f"timeUnit_{TimeUnit.id}"
@@ -16,11 +16,6 @@ class TimeUnit:
         self.ExecutionPlans = [] #Not inserted into the DB
         self.ST = 0
         self.CoT = 0
-        
-        if Database == "COFACTORY_GR":
-            TimeUnit.GR_instances.append(self)
-        elif Database == "COFACTORY_PT":
-            TimeUnit.PT_instances.append(self)
 
     @classmethod
     def clear_instances(cls):
@@ -204,7 +199,7 @@ class ProductionOrder:
 class ExecutionPlan:
     id = 0
     GR_instances, PT_instances = [], []
-    def __init__(self, ItemRoot, ItemRelated, Quantity, BoMId, ProductionOrder, Database):
+    def __init__(self, ItemRoot, ItemRelated, Quantity, BoMId, ProductionOrder):
         ExecutionPlan.id += 1
         self.id = ExecutionPlan.id
         self.ItemRoot = ItemRoot
@@ -216,12 +211,8 @@ class ExecutionPlan:
         self.ST = 0
         self.CoT = 0
         self.BoMId = BoMId #Not inserted into the DB
+        self.PlanoId = None
         
-        if Database == "COFACTORY_GR":
-            ExecutionPlan.GR_instances.append(self)
-        elif Database == "COFACTORY_PT":
-            ExecutionPlan.PT_instances.append(self)
-
     @classmethod
     def clear_instances(cls):
         # Clears all instances from both lists
@@ -395,6 +386,7 @@ class DataHandler:
 
         for instance in self.Stock:
             if instance.Item == product_name:
+                
                 if (instance.StockAvailable + item_stock) > 0:
                     if (instance.StockAvailable + item_stock) >= qty:
                         instance.StockAvailable -= qty
@@ -415,7 +407,7 @@ class DataHandler:
             
             # Criar plano de execução para o item principal se for a primeira iteração
             if first_iter and if_routing_exists(main_item.Name, machines_Torc):
-                ep = ExecutionPlan(None, main_item, float(quantity), None, prod_order, self.Database)
+                ep = ExecutionPlan(None, main_item, float(quantity), None, prod_order)
                 self.ExecutionPlans.append(ep)
             elif not if_routing_exists(main_item.Name, machines_Torc):
                 no_routings.append(main_item.Name)
@@ -433,7 +425,7 @@ class DataHandler:
                     for _ in range(BoM_Item.Quantity):
                         if if_routing_exists(item.Name, machine_list):
                             ep = ExecutionPlan(main_item if parent_item is None else parent_item, item,
-                                          float(production_qty), bom.id, prod_order, self.Database)
+                                          float(production_qty), bom.id, prod_order)
                             self.ExecutionPlans.append(ep)
                         else:
                             no_routings.append(item.Name)
@@ -446,7 +438,7 @@ class DataHandler:
                     for _ in range(BoM_Item.Quantity):
                         if if_routing_exists(item.Name, machines_Tref):
                             ep = ExecutionPlan(main_item if parent_item is None else parent_item, item,
-                                          float(production_qty), bom.id, prod_order, self.Database)
+                                          float(production_qty), bom.id, prod_order)
                             self.ExecutionPlans.append(ep)
                         else:
                             no_routings.append(item.Name)
@@ -490,14 +482,14 @@ class DataHandler:
                     for BoM_Item in bom.BoMItems:
                         ROD_item = Items.get_Item(BoM_Item.ItemRelated, self.Database)
                         for _ in range(tref_item.Input):
-                            prod_qty = float(self.checkStock(tref_item.Name, ROD_item.OrderIncrement)
+                            prod_qty = int(self.checkStock(tref_item.Name, ROD_item.OrderIncrement)
                                              if self.Criteria[3] else ROD_item.OrderIncrement)
                             if PT_Settings:
                                 prod_order = next((exec_plan.ProductionOrder for exec_plan in self.ExecutionPlans
                                                    if tref_item.Name == exec_plan.ItemRelated.Name))
                                 if prod_qty != 0:      
                                     ep = ExecutionPlan(tref_item, ROD_item, ROD_item.OrderIncrement, bom.id,
-                                                  prod_order, self.Database)
+                                                  prod_order)
                                     self.ExecutionPlans.append(ep)
         
         # After creating all execution plans, remove all instances where Process isnt ROD, MDW or BUN   
@@ -644,24 +636,35 @@ class DataHandler:
         def create_timeunits_objects(rows):
             for row in rows:
                 time_unit_id, machine_code, st, cot = row
-                tu_instance = TimeUnit(machine_code, database)
+                tu_instance = TimeUnit(machine_code)
                 tu_instance.id = time_unit_id
                 tu_instance.ST = st
                 tu_instance.CoT = cot
+                
+                if database == "COFACTORY_GR":
+                    TimeUnit.GR_instances.append(tu_instance)
+                elif database == "COFACTORY_PT":
+                    TimeUnit.PT_instances.append(tu_instance)
 
         def create_executionplans_objects(rows):
             for row in rows:
-                exec_plan_id, main_item_name, item_name, quantity, machine_code, prod_order_id, time_unit_position, st, cot = row
+                exec_plan_id, main_item_name, item_name, quantity, machine_code, prod_order_id, time_unit_position, st, cot, plano_id = row
 
                 item_root = Items.get_Item(main_item_name, database) if main_item_name else None
                 item_related = Items.get_Item(item_name, database)
 
-                exec_plan = ExecutionPlan(item_root, item_related, quantity, None, prod_order_id, database)
+                exec_plan = ExecutionPlan(item_root, item_related, quantity, None, prod_order_id)
                 exec_plan.id = exec_plan_id
                 exec_plan.Machine = machine_code
                 exec_plan.Position = time_unit_position
                 exec_plan.ST = st
                 exec_plan.CoT = cot
+                exec_plan.PlanoId = plano_id
+                
+                if database == "COFACTORY_GR":
+                    ExecutionPlan.GR_instances.append(exec_plan)
+                elif database == "COFACTORY_PT":
+                    ExecutionPlan.PT_instances.append(exec_plan)
 
         def create_timeunit_executionplans_objects(rows):
             instances = {
@@ -687,7 +690,7 @@ class DataHandler:
             "setup_times": "SELECT FromMaterial, ToMaterial, SetupTime FROM SetupTimesByMaterial",
             "stock": "SELECT Warehouse, Item, StockAvailable, StockAllocated, StockEconomic FROM Stock",
             "timeunits": "SELECT id, Machine, StartTime, CompletionTime FROM TimeUnits",
-            "execution_plans": "SELECT id, MainItem, Item, Quantity, Machine, ProductionOrder, Position, StartTime, CompletionTime FROM ExecutionPlans",
+            "execution_plans": "SELECT id, MainItem, Item, Quantity, Machine, ProductionOrder, Position, StartTime, CompletionTime, PlanoId FROM ExecutionPlans",
             "timeunit_executionplans": "SELECT tep.TimeUnitId, tep.ExecutionPlanId FROM TimeUnitExecutionPlans tep JOIN TimeUnits tu ON tep.TimeUnitId = tu.id JOIN ExecutionPlans ep ON tep.ExecutionPlanId = ep.id"
         }
 
@@ -810,6 +813,7 @@ class DataHandler:
                 for exec_plan in self.ExecutionPlans:
                     main_item = exec_plan.ItemRoot.Name if exec_plan.ItemRoot else ''
                     time_unit_position = exec_plan.Position if exec_plan.Position else ''
+                    exec_plan.PlanoId = PlanoId
                     cursor.execute(insert_executionplan_query, (
                         main_item, exec_plan.ItemRelated.Name, exec_plan.Quantity, exec_plan.Machine,
                         exec_plan.ProductionOrder.id, time_unit_position, exec_plan.ST, exec_plan.CoT, PlanoId

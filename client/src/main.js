@@ -4,9 +4,9 @@ import router from './router'
 import 'bootstrap/dist/css/bootstrap.css'
 import { library } from '@fortawesome/fontawesome-svg-core';
 import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome';
-import { faArrowLeft, faArrowRight, faBars, faFilter } from '@fortawesome/free-solid-svg-icons';
+import { faArrowLeft, faArrowRight, faBars, faFilter, faSort } from '@fortawesome/free-solid-svg-icons';
 
-library.add(faArrowLeft, faArrowRight, faFilter, faBars);
+library.add(faArrowLeft, faArrowRight, faFilter, faBars, faSort);
 
 const app = createApp(App)
 

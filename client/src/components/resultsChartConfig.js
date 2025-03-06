@@ -2,6 +2,10 @@ import { ref, reactive } from 'vue';
 import axios from 'axios';
 import { startOfWeek, endOfWeek } from 'date-fns';
 
+const apiUrl = import.meta.env.VITE_FLASK_HOST 
+  ? `http://${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`
+  : 'http://localhost:5001';
+
 export const machines = ref([]);
 const exec_plans = ref([]);
 const new_exec_plans = ref([]);
@@ -84,7 +88,6 @@ export const options = reactive({
           enabled: true,
           backgroundColor: 'rgba(48, 47, 47, 0.25)',
         },
-        
       }
     },
   },
@@ -114,7 +117,7 @@ const shadeColor = (color, percent) => {
 };
 
 export const getData = async () => {
-  const path = 'http://localhost:5001/getNewChartData';
+  const path = `${apiUrl}/getNewChartData`;
   try {
     const res = await axios.get(path, { withCredentials: true });
     exec_plans.value = res.data.exec_plans;

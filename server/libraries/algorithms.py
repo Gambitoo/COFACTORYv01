@@ -412,7 +412,7 @@ class TrefPandS():
                 for machine in self.Machines:
                     TUCount = 0
                     if solution["individual_weights_POs"][machine.MachineCode]:
-                        timeUnit = TimeUnit(machine.MachineCode, self.DataHandler.Database)
+                        timeUnit = TimeUnit(machine.MachineCode)
                         self.DataHandler.TimeUnits.append(timeUnit)
                         for exec_plan in self.DataHandler.ExecutionPlans:
                             for exec_plan_id in solution["allocated_exec_plans"][machine.MachineCode]:
