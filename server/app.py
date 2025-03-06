@@ -18,7 +18,7 @@ from libraries.utils import (Items, TimeUnit, ProductionOrder, ExecutionPlan, Ma
 from libraries.main_handler import executePandS, processExtrusionInput
 
 # Load the .env file with environment variables
-load_dotenv('config.env')
+load_dotenv('.env')
 
 INPUT_FOLDER = os.environ.get('STORAGE_PATH')
 ALLOWED_EXTENSIONS = {'xlsx'}
