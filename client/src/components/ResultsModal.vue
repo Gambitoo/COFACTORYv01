@@ -2,7 +2,7 @@
   <div class="gantt-modal">
     <div class="modal-content">
       <h2>Novo Planeamento</h2>
-      <div class="gantt-chart">
+      <div>
         <!-- Render the Gantt chart -->
         <ResultsGanttChart :data="chartData" />
       </div>

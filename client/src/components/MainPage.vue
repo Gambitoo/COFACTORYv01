@@ -156,7 +156,7 @@ export default {
                 }
             } catch (error) {
                 console.error("Erro ao selecionar a unidade de produção:", error);
-                alert("Ocorreu um erro ao selecionar a unidade de produção.");
+                alert(error);
             }
         },
         async createNewPlan() {
@@ -317,7 +317,6 @@ export default {
                 .catch((error) => {
                     console.error("Erro na solicitação de remoção:", error);
                 });
-            
         },
         closeRemoveMachinesModal() {
             this.deleteFileRequest();
@@ -356,6 +355,7 @@ export default {
                     method: 'POST',
                     credentials: 'include',
                 })
+                    .then(response => response.json())
                     .then((data) => {
                         // Check if items with no routings and/or no BoM's exist
                         if (data.no_routings && data.no_routings.length > 0) {
@@ -382,7 +382,6 @@ export default {
                             })
                             .catch((error) => {
                                 console.error("Erro na execução do algoritmo:", error);
-                                
                                 if (error && error.message) {
                                     alert(error.message);
                                 } else {

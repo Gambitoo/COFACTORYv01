@@ -10,6 +10,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd())
 
   return {
+    base: "/App/MetalPlanning",
     plugins: [vue(), vueJsx(), vueDevTools({launchEditor: "code"}),],
     resolve: {
       alias: {

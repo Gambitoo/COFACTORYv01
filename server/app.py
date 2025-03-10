@@ -46,13 +46,15 @@ running_algorithms = {}
 
 # Load data from both databases
 connection_strings = {
-    "COFACTORY_PT": f'DRIVER={{SQL Server}};SERVER={os.environ.get("COFPT_DATABASE_SERVER")};'
-                    f'DATABASE=COFACTORY_PT;UID={os.environ.get("COFPT_DATABASE_USERNAME")};'
-                    f'PWD={os.environ.get("COFPT_DATABASE_PASSWORD")};',
+    "COFACTORY_PT": f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={os.environ.get("COFPT_DATABASE_SERVER")};'
+                    f'DATABASE={os.environ.get("COFPT_DATABASE_NAME")};UID={os.environ.get("COFPT_DATABASE_USERNAME")};'
+                    f'PWD={os.environ.get("COFPT_DATABASE_PASSWORD")};'
+                    f'TrustServerCertificate=yes;',
     
-    "COFACTORY_GR": f'DRIVER={{SQL Server}};SERVER={os.environ.get("COFGR_DATABASE_SERVER")};'
-                    f'DATABASE=COFACTORY_GR;UID={os.environ.get("COFGR_DATABASE_USERNAME")};'
+    "COFACTORY_GR": f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={os.environ.get("COFGR_DATABASE_SERVER")};'
+                    f'DATABASE={os.environ.get("COFGR_DATABASE_NAME")};UID={os.environ.get("COFGR_DATABASE_USERNAME")};'
                     f'PWD={os.environ.get("COFGR_DATABASE_PASSWORD")};'
+                    f'TrustServerCertificate=yes;'
 }
 
 for db_name, connection_string in connection_strings.items():
@@ -365,7 +367,7 @@ def process_criteria():
     dataHandler.Criteria = parsed_criteria
     print(parsed_criteria)
 
-    return jsonify({'message': 'Critérios processados com sucesso.', 'criteria': selected_criteria}), 200
+    return jsonify({'status': 'success', 'criteria': selected_criteria}), 200
 
 @app.route('/machines', methods=['GET'])
 def get_machines():
@@ -411,7 +413,7 @@ def remove_machines():
         if machine:
             machine.IsActive = False
     
-    return jsonify({"message": "BoM's removidas com sucesso."}), 200 # A success message is returned, if the machines are removed successfully.
+    return jsonify({'status': 'success'}), 200 # A success message is returned, if the machines are removed successfully.
 
 @app.route('/removeBoMs', methods=['POST'])
 def remove_boms():
@@ -422,7 +424,7 @@ def remove_boms():
     # Add to the algorithm criteria the BoM's that should disregarded
     dataHandler.Criteria[5] = boms_to_remove
 
-    return jsonify({"message": "Máquinas removidas com sucesso."}), 200 # A success message is returned, if the BoM's are removed successfully.
+    return jsonify({'status': 'success'}), 200 # A success message is returned, if the BoM's are removed successfully.
 
 @app.route('/createData', methods=['POST'])
 def create_data():
@@ -439,9 +441,9 @@ def create_data():
     no_routings, no_bom = processExtrusionInput(dataHandler, user_data[user_id]["input_file"])
     
     return jsonify({
-        "message": "Os dados foram criados com sucesso.",
-        "no_routings": no_routings,
-        "no_bom": no_bom,
+        'status': 'success',
+        'no_routings': no_routings,
+        'no_bom': no_bom,
     }), 200
     
 def run_algorithm_in_thread(user_id, dataHandler, PT_Settings):
@@ -543,7 +545,7 @@ def abort_algorithm():
         running_algorithms[user_id]["status"] = "aborted"
         running_algorithms[user_id]["message"] = "Algorithm was aborted by user"
         
-        return jsonify({'status': 'success', 'message': 'Algorithm aborted'}), 200
+        return jsonify({'status': 'success', 'message': 'Algoritmo abortado.'}), 200
     
     # If we get here, either there's no algorithm for this user or it's already completed
     return jsonify({'status': 'not_found', 'message': 'Não foi encontrado nenhum algoritmo em execução.'}), 404
@@ -565,7 +567,7 @@ def save_results():
         os.rename(input_file, final_path)
         user_data[user_id]["input_file"] = None
     else:
-        return jsonify({"error": "Ficheiro não encontrado."}), 404    
+        return jsonify({'status': 'not_found', "message": "Ficheiro não encontrado."}), 404    
         
     # Organize the created plan in two Excel files, and write them to the plan folder
     PT_Settings = True if dataHandler.Database == "COFACTORY_PT" else False
@@ -703,7 +705,7 @@ def download_file(folder_name, filename):
     plan_folder = os.path.join(app.config['UPLOAD_FOLDER'], folder_name)
     
     if not os.path.exists(os.path.join(plan_folder, filename)):
-        return jsonify({"error": "Ficheiro não encontrado."}), 404
+        return jsonify({"message": "Ficheiro não encontrado."}), 404
 
     return send_from_directory(plan_folder, filename, as_attachment=True)
    

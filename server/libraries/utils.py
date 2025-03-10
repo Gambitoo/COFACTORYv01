@@ -802,8 +802,10 @@ class DataHandler:
             with conn.cursor() as cursor:
                 # Insert TimeUnit instances
                 insert_timeunit_query = """INSERT INTO TimeUnits (Machine, StartTime, CompletionTime) VALUES (?, ?, ?)"""
-                for TU in self.TimeUnits:
-                    cursor.execute(insert_timeunit_query, (TU.Machine, TU.ST, TU.CoT))
+                for time_unit in self.TimeUnits:
+                    time_unit.ST = time_unit.ST.replace(microsecond=0)
+                    time_unit.CoT = time_unit.CoT.replace(microsecond=0)
+                    cursor.execute(insert_timeunit_query, (time_unit.Machine, time_unit.ST, time_unit.CoT))
 
                 # Insert ExecutionPlan instances
                 insert_executionplan_query = """
@@ -811,6 +813,8 @@ class DataHandler:
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"""
 
                 for exec_plan in self.ExecutionPlans:
+                    exec_plan.ST = exec_plan.ST.replace(microsecond=0)
+                    exec_plan.CoT = exec_plan.CoT.replace(microsecond=0)
                     main_item = exec_plan.ItemRoot.Name if exec_plan.ItemRoot else ''
                     time_unit_position = exec_plan.Position if exec_plan.Position else ''
                     exec_plan.PlanoId = PlanoId
@@ -827,12 +831,13 @@ class DataHandler:
                     AND ProductionOrder = ? AND Position = ? AND StartTime = ? AND CompletionTime = ? AND PlanoId = ?)
                 )"""
                 
-                for TU in self.TimeUnits:
-                    for exec_plan in TU.ExecutionPlans:
+                for time_unit in self.TimeUnits:
+                    for exec_plan in time_unit.ExecutionPlans:
                         main_item = exec_plan.ItemRoot.Name if exec_plan.ItemRoot else ''
                         time_unit_position = exec_plan.Position if exec_plan.Position else ''
+
                         cursor.execute(insert_timeunit_execplan_query, (
-                            TU.Machine, TU.ST, TU.CoT,
+                            time_unit.Machine, time_unit.ST, time_unit.CoT,
                             main_item, exec_plan.ItemRelated.Name, exec_plan.Quantity, exec_plan.Machine,
                             exec_plan.ProductionOrder.id, time_unit_position, exec_plan.ST, exec_plan.CoT, PlanoId
                         ))

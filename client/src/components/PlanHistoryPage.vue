@@ -20,6 +20,7 @@
           <th>Critérios</th>
           <th>Ficheiro Input</th>
           <th>Ficheiros Output</th>
+          <th>Plano</th>
         </tr>
       </thead>
       <tbody>
@@ -42,6 +43,13 @@
               </button>
             </div>
           </td>
+          <td>
+            <div class="button-container">
+              <button>
+                <ResultsGanttChart :data="chartData" :uniqueId="`${formatDateForId(formatDate(plan.ST))}_${plan.user_id}`" />
+              </button>
+            </div>
+          </td>
         </tr>
       </tbody>
     </table>
@@ -50,7 +58,16 @@
 </template>
 
 <script lang="ts">
+import ResultsGanttChart from "@/components/ResultsGanttChart.vue";
+
 export default {
+  components: { ResultsGanttChart },
+  props: {
+    chartData: {
+      type: Array,
+      required: true,
+    },
+  },
   data() {
     return {
       plans: [] as any[], // Store historical plans
@@ -83,7 +100,24 @@ export default {
       }
     },
     formatDate(timestamp: number | string) {
-      return timestamp ? new Date(timestamp).toLocaleString() : "N/A";
+      // Format for display
+      return timestamp ? new Date(timestamp).toLocaleString(pt-PT) : "N/A";
+    },
+    formatSTForId(timestamp) {
+      // Format date for userId concatenation
+      if (!timestamp) return '';
+
+      const date = new Date(timestamp);
+
+      // Format as DDMMYYYYHHmmss
+      const day = String(date.getDate());
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const year = date.getFullYear();
+      const hours = String(date.getHours()).padStart(2, '0');
+      const minutes = String(date.getMinutes()).padStart(2, '0');
+      const seconds = String(date.getSeconds()).padStart(2, '0');
+
+      return `${day}${month}${year}${hours}${minutes}${seconds}`;
     },
     downloadFile(url: string) {
       const link = document.createElement("a");
