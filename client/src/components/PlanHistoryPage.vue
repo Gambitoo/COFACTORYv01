@@ -45,8 +45,8 @@
           </td>
           <td>
             <div class="button-container">
-              <button>
-                <ResultsGanttChart :data="chartData" :uniqueId="`${formatDateForId(formatDate(plan.ST))}_${plan.user_id}`" />
+              <button @click="openGanttModal(plan)">
+                Ver Plano
               </button>
             </div>
           </td>
@@ -54,6 +54,20 @@
       </tbody>
     </table>
     <button class="close-btn" @click="$emit('close')">Fechar</button>
+
+    <div v-if="showGanttModal" class="gantt-modal">
+      <div class="modal-container">
+        <div class="modal-header">
+          <h3>Visualização do Plano</h3>
+          <button @click="closeGanttModal" class="gantt-close-btn">×</button>
+        </div>
+        <div class="modal-content">
+          <ResultsGanttChart 
+            :uniqueId="`${formatDateForId(formatDate(selectedPlan.ST))}_${selectedPlan.user_id}`" 
+          />
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -62,12 +76,6 @@ import ResultsGanttChart from "@/components/ResultsGanttChart.vue";
 
 export default {
   components: { ResultsGanttChart },
-  props: {
-    chartData: {
-      type: Array,
-      required: true,
-    },
-  },
   data() {
     return {
       plans: [] as any[], // Store historical plans
@@ -75,6 +83,8 @@ export default {
         ST: 'asc', // Default sort order for 'Tempo de Início'
         CoT: 'asc', // Default sort order for 'Tempo de Conclusão'
       },
+      showGanttModal: false,
+      selectedPlan: null,
       apiUrl: import.meta.env.VITE_FLASK_HOST 
                 ? `http://${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`
                 : 'http://localhost:5001',
@@ -101,9 +111,9 @@ export default {
     },
     formatDate(timestamp: number | string) {
       // Format for display
-      return timestamp ? new Date(timestamp).toLocaleString(pt-PT) : "N/A";
+      return timestamp ? new Date(timestamp).toLocaleString("pt-PT") : "N/A";
     },
-    formatSTForId(timestamp) {
+    formatDateForId(timestamp) {
       // Format date for userId concatenation
       if (!timestamp) return '';
 
@@ -141,6 +151,14 @@ export default {
         }
       });
     },
+    openGanttModal(plan) {
+      this.selectedPlan = plan;
+      this.showGanttModal = true;
+    },
+    closeGanttModal() {
+      this.showGanttModal = false;
+      this.selectedPlan = null;
+    }
   },
 };
 </script>
@@ -199,5 +217,42 @@ button.sort {
 
 .sort:hover {
   color: gray;
+}
+
+.gantt-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.modal-container {
+  background: #fff;
+  border-radius: 10px;
+  width: 90%;
+  max-height: 90vh;
+  overflow: auto;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 20px;
+  border-bottom: 1px solid #eee;
+}
+
+.modal-content {
+  padding: 10px;
+}
+
+.gantt-close-btn {
+  background: #d9534f;
 }
 </style>

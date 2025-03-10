@@ -4,7 +4,7 @@
       <h2>Novo Planeamento</h2>
       <div>
         <!-- Render the Gantt chart -->
-        <ResultsGanttChart :data="chartData" />
+        <ResultsGanttChart/>
       </div>
       <div class="button-group">
         <button @click="confirm" class="confirm-btn">Guardar</button>
@@ -20,12 +20,6 @@ import ResultsGanttChart from "@/components/ResultsGanttChart.vue";
 
 export default {
   components: { ResultsGanttChart },
-  props: {
-    chartData: {
-      type: Array,
-      required: true,
-    },
-  },
   methods: {
     confirm() {
       this.$emit("confirm");

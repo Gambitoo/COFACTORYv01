@@ -835,7 +835,27 @@ class DataHandler:
                     for exec_plan in time_unit.ExecutionPlans:
                         main_item = exec_plan.ItemRoot.Name if exec_plan.ItemRoot else ''
                         time_unit_position = exec_plan.Position if exec_plan.Position else ''
+                        
+                        cursor.execute(
+                            "SELECT id FROM TimeUnits WHERE Machine = ? AND StartTime = ? AND CompletionTime = ?",
+                            (time_unit.Machine, time_unit.ST, time_unit.CoT)
+                        )
+                        time_unit_id = cursor.fetchone()
 
+                        cursor.execute(
+                            "SELECT id FROM ExecutionPlans WHERE MainItem = ? AND Item = ? AND Quantity = ? AND Machine = ? "
+                            "AND ProductionOrder = ? AND Position = ? AND StartTime = ? AND CompletionTime = ? AND PlanoId = ?",
+                            (main_item, exec_plan.ItemRelated.Name, exec_plan.Quantity, exec_plan.Machine,
+                             exec_plan.ProductionOrder.id, time_unit_position, exec_plan.ST, exec_plan.CoT, PlanoId)
+                        )
+                        exec_plan_id = cursor.fetchone()
+
+                        if not time_unit_id:
+                            print(f"Error: No matching TimeUnit for Machine={time_unit.Machine}, StartTime={time_unit.ST}, CompletionTime={time_unit.CoT}")
+                        if not exec_plan_id:
+                            print(f"Error: No matching ExecutionPlan for MainItem={main_item}, Item={exec_plan.ItemRelated.Name}, "
+                                  f"Quantity={exec_plan.Quantity}, Machine={exec_plan.Machine}")
+                        
                         cursor.execute(insert_timeunit_execplan_query, (
                             time_unit.Machine, time_unit.ST, time_unit.CoT,
                             main_item, exec_plan.ItemRelated.Name, exec_plan.Quantity, exec_plan.Machine,
