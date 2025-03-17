@@ -116,10 +116,13 @@ const shadeColor = (color, percent) => {
   );
 };
 
-export const getData = async () => {
+export const getData = async (planoId) => {
   const path = `${apiUrl}/getNewChartData`;
   try {
-    const res = await axios.get(path, { withCredentials: true });
+    const res = await axios.get(path, { 
+      params: { planoId },
+      headers: { 'Content-Type': 'application/json' },
+      withCredentials: true });
     exec_plans.value = res.data.exec_plans;
     new_exec_plans.value = res.data.new_exec_plans;
     machines.value = res.data.machines;

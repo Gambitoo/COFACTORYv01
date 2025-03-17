@@ -1,7 +1,9 @@
 <template>
     <div class="modal-backdrop">
         <div class="modal-content">
-            <h2>{{ title }}</h2>
+            <div class="modal-header">
+                <h2>{{ title }}</h2>
+            </div>
             <div class="checkbox-group">
                 <label v-for="(option, index) in criteria" :key="index">
                     <input type="checkbox" :value="index" v-model="selectedCriteria" />
@@ -66,6 +68,13 @@ export default {
     text-align: center;
 }
 
+.modal-header {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border-bottom: 2px solid #eee;
+}
+
 .checkbox-group {
     margin: 10px 0;
     display: flex;
@@ -86,7 +95,6 @@ export default {
 }
 
 .modal-actions button {
-    margin: 5px;
     padding: 8px 15px;
     border: none;
     border-radius: 5px;

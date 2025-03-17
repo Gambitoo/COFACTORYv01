@@ -319,7 +319,14 @@ class DataHandler:
     def __init__(self, database, connection_string):
         self.Database, self.ConnectionString, self.CurrentTime = database, connection_string, None
         # Store user specific and general data
-        self.ExecutionPlans, self.TimeUnits, self.ProductionOrders, self.Machines, self.Items, self.Routings, self.BoMs, self.BoMItems, self.SetupTimesByMaterial, self.Stock = [], [], [], [], [], [], [], [], [], []
+        self.ExecutionPlans, self.TimeUnits, self.ProductionOrders = [], [], []
+        self.Machines = Machines.GR_instances if self.Database == "COFACTORY_GR" else Machines.PT_instances
+        self.BoMs = BoM.GR_instances if self.Database == "COFACTORY_GR" else BoM.PT_instances
+        self.BoMItems = BoMItem.GR_instances if self.Database == "COFACTORY_GR" else BoMItem.PT_instances
+        self.Routings = Routings.GR_instances if self.Database == "COFACTORY_GR" else Routings.PT_instances
+        self.Items = Items.GR_instances if self.Database == "COFACTORY_GR" else Items.PT_instances
+        self.SetupTimesByMaterial = SetupTimesByMaterial.GR_instances if self.Database == "COFACTORY_GR" else SetupTimesByMaterial.PT_instances
+        self.Stock = Stock.GR_instances if self.Database == "COFACTORY_GR" else Stock.PT_instances
         # Store process specific data
         self.RODMachines, self.TorcMachines, self.TrefMachines = [], [], []
         self.RODItems, self.TorcItems, self.TrefItems = [], [], []
@@ -443,8 +450,8 @@ class DataHandler:
                         else:
                             no_routings.append(item.Name)
 
-        machines_Torc = [machine.MachineCode for machine in self.TorcMachines]
-        machines_Tref = [machine.MachineCode for machine in self.TrefMachines]
+        machines_Torc = [machine.MachineCode for machine in self.TorcMachines if machine.IsActive]
+        machines_Tref = [machine.MachineCode for machine in self.TrefMachines if machine.IsActive]
 
         order_increment = main_item.OrderIncrement
         total_qty, remainder_qty = divmod(prod_order.Quantity, order_increment)
@@ -864,14 +871,6 @@ class DataHandler:
 
     def setupData(self):
         """Setup the user specific data, according to the choosen database"""
-        self.Machines = Machines.GR_instances if self.Database == "COFACTORY_GR" else Machines.PT_instances
-        self.BoMs = BoM.GR_instances if self.Database == "COFACTORY_GR" else BoM.PT_instances
-        self.BoMItems = BoMItem.GR_instances if self.Database == "COFACTORY_GR" else BoMItem.PT_instances
-        self.Routings = Routings.GR_instances if self.Database == "COFACTORY_GR" else Routings.PT_instances
-        self.Items = Items.GR_instances if self.Database == "COFACTORY_GR" else Items.PT_instances
-        self.SetupTimesByMaterial = SetupTimesByMaterial.GR_instances if self.Database == "COFACTORY_GR" else SetupTimesByMaterial.PT_instances
-        self.Stock = Stock.GR_instances if self.Database == "COFACTORY_GR" else Stock.PT_instances
-        
         for mach in self.Machines:
             if "ROD0" in mach.MachineCode:
                 self.RODMachines.append(mach)

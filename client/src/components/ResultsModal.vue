@@ -1,15 +1,20 @@
 <template>
   <div class="gantt-modal">
-    <div class="modal-content">
-      <h2>Novo Planeamento</h2>
-      <div>
+    <div class="modal-container">
+      <div class="modal-header">
+        <h2>Novo Planeamento</h2>
+        <button @click="cancel" class="cancel-btn">
+          <font-awesome-icon icon="xmark" />
+        </button>
+      </div>
+      <div class="modal-content">
         <!-- Render the Gantt chart -->
         <ResultsGanttChart/>
       </div>
       <div class="button-group">
         <button @click="confirm" class="confirm-btn">Guardar</button>
         <button @click="rerun" class="rerun-btn">Correr Novamente</button>
-        <button @click="cancel" class="cancel-btn">Cancelar</button>
+        
       </div>
     </div>
   </div>
@@ -17,9 +22,10 @@
 
 <script lang="ts">
 import ResultsGanttChart from "@/components/ResultsGanttChart.vue";
+import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome';
 
 export default {
-  components: { ResultsGanttChart },
+  components: { ResultsGanttChart, FontAwesomeIcon },
   methods: {
     confirm() {
       this.$emit("confirm");
@@ -48,20 +54,32 @@ export default {
   align-items: center;
 }
 
-.modal-content {
+.modal-container {
   background: #fff;
-  padding: 20px;
   border-radius: 10px;
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
   width: 90%;
-  max-height: 95%;
-  overflow-y: auto;
+  max-height: 90vh;
+  overflow: auto;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 15px 20px;
+  border-bottom: 1px solid #eee;
+}
+
+.modal-content {
+  padding: 10px;
 }
 
 .button-group {
   display: flex;
   justify-content: space-between;
   margin-top: 20px;
+  padding: 15px 15px;
 }
 
 .button-group .confirm-btn {
@@ -78,18 +96,18 @@ export default {
   background-color: #45a049;
 }
 
-.button-group .cancel-btn {
-  padding: 10px 20px;
+.cancel-btn {
   background-color: #f44336;
   color: white;
   border: none;
   border-radius: 5px;
   cursor: pointer;
   transition: 0.3s;
+  padding: 5px 10px;
 }
 
-.button-group .cancel-btn:hover {
-  background-color: #d32f2f;
+.cancel-btn:hover {
+  background: #45a049;
 }
 
 .button-group .rerun-btn {

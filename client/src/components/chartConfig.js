@@ -119,7 +119,6 @@ const shadeColor = (color, percent) => {
 };
 
 export const getData = async () => {
-  console.log('GanttChart getData()');
   const path = `${apiUrl}/getChartData`;
   try {
     const res = await axios.get(path, { withCredentials: true });

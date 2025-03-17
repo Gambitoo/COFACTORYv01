@@ -54,7 +54,7 @@ export default {
         belongsToSameProcess(machine, process) {
             // Machines starting with "BMC" also belong to "BUN"
             const processMapping = {
-                "BMC0": "BUN0"
+                "BMC0": "BUN"
             };
 
             return processMapping[machine.substring(0, 4)] === process;
@@ -88,7 +88,7 @@ export default {
     padding: 20px;
     border-radius: 8px;
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    width: 400px;
+    width: 30%;
     text-align: center;
 }
 
@@ -100,12 +100,15 @@ export default {
 }
 
 .scroll-container {
-    max-height: 350px;
+    max-height: 450px;
     overflow-y: auto;
     width: 100%;
-    padding: 5px;
     border: 1px solid #ccc;
     border-radius: 4px;
+}
+
+.scroll-container h3 {
+    margin-top: 10px;
 }
 
 .checkbox-group label {
@@ -120,7 +123,6 @@ export default {
 }
 
 .modal-actions button {
-    margin: 5px;
     padding: 8px 15px;
     border: none;
     border-radius: 5px;

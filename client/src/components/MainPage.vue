@@ -1,15 +1,15 @@
 <template>
     <div class="main-view" :class="{ 'disabled-content': showBranchModal }">
         <header class="header">
-            <div class="left-section">
+            <div ref="detectOutsideClick" class="left-section">
                 <button @click="toggleMenu" class="menu-btn">
                     <font-awesome-icon icon="fa-solid fa-bars" />
                 </button>
                 <h1>COFACTORY</h1>
-                <div v-if="menuOpen" class="dropdown-menu">
+                <div  v-if="menuOpen" class="dropdown-menu">
                     <ul>
                         <li @click="createNewPlan">Criar Novo Plano</li>
-                        <li @click="openPlanHistoryPage">Histórico de Planos</li> 
+                        <li @click="openPlanHistoryPage">Histórico de Planos</li>
                     </ul>
                 </div>
             </div>
@@ -21,8 +21,8 @@
         </div>
 
         <!-- Other modals -->
-        <CriteriaModal v-if="showCriteriaModal" :title="modalTitle" :criteria="criteria"
-            @confirm="handleModalConfirm" @close="closeCriteriaModal"/>
+        <CriteriaModal v-if="showCriteriaModal" :title="modalTitle" :criteria="criteria" @confirm="handleModalConfirm"
+            @close="closeCriteriaModal" />
 
         <RemoveMachinesModal v-if="showRemoveMachinesModal" :machines="availableMachines" :processes="processes"
             @confirm="handleRemoveMachinesConfirm" @close="closeRemoveMachinesModal" />
@@ -33,7 +33,8 @@
         <ResultsModal v-if="showResultsModal" @confirm="handleResultsConfirm" @cancel="closeResultsModal"
             @rerun="rerunPlan" />
 
-        <MissingItemsModal v-if="showMissingItemsModal" :noRoutings="noRoutings" :noBoms="noBoms"
+        <MissingItemsModal v-if="missingItemsData[userID]?.shouldShow"
+            :noRoutings="missingItemsData[userID]?.noRoutings || []" :noBoms="missingItemsData[userID]?.noBoms || []"
             @close="closeMissingItemsModal" />
 
         <PlanHistoryPage v-if="showPlanHistory" @close="closePlanHistoryPage" />
@@ -53,6 +54,8 @@ import ResultsModal from "@/components/ResultsModal.vue";
 import MissingItemsModal from "@/components/MissingItemsModal.vue";
 //import BranchSelectionModal from "@/components/BranchSelectionModal.vue";
 import PlanHistoryPage from "@/components/PlanHistoryPage.vue";
+import type { OnClickOutsideHandler } from '@vueuse/core'
+import { shallowRef } from 'vue'
 
 export default {
     components: { GanttChart, CriteriaModal, RemoveMachinesModal, RemoveBoMsModal, ResultsModal, MissingItemsModal, PlanHistoryPage },
@@ -65,7 +68,6 @@ export default {
             showRemoveBoMsModal: false,
             showResultsModal: false,
             showGanttChart: false,
-            showMissingItemsModal: false,
             showPlanHistory: false,
             modalTitle: "",
             criteria: ["Remover Máquinas", "Organizar por Melhor Cycle Time", "Sequenciamento por Diâmetro", "Consumir Stock disponível", "Menor Número de Mudanças", "Desativar BoMs"],
@@ -76,36 +78,41 @@ export default {
             inputBoMs: null as any,
             criteriaSelected: false,
             machinesRemoved: false,
+            missingItemsData: {},
             bomsRemoved: false,
             isAlgorithmRunning: false,
-            noRoutings: [],
-            noBoms: [],
             renderKey: 0,
             menuOpen: false,
-            apiUrl: import.meta.env.VITE_FLASK_HOST 
+            apiUrl: import.meta.env.VITE_FLASK_HOST
                 ? `http://${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`
                 : 'http://localhost:5001',
         };
     },
     mounted() {
         window.addEventListener("beforeunload", this.handlePageUnload);
-
+        document.addEventListener('click', this.handleClickOutside);
         // Check for URL parameters
         this.checkUrlParameters();
     },
     beforeDestroy() {
         window.removeEventListener("beforeunload", this.handlePageUnload);
+        document.removeEventListener('click', this.handleClickOutside);
     },
     methods: {
+        handleClickOutside(event) {
+            if (!this.$refs.detectOutsideClick.contains(event.target)) {
+                this.menuOpen = false;
+            }
+        },
         // New method to check URL parameters
         checkUrlParameters() {
             // Get URL search parameters
             const urlParams = new URLSearchParams(window.location.search);
-            
+
             // Check for BRANCH and USER parameters
             const branch = urlParams.get('BRANCH');
             const userId = urlParams.get('USER');
-            
+
             if (branch && userId) {
                 // Map BRANCH parameter to correct database name
                 let dbBranch;
@@ -119,7 +126,7 @@ export default {
             } else {
                 console.error("Branch or userId missing in URL parameters.");
             }
-            
+
         },
         toggleMenu() {
             this.menuOpen = !this.menuOpen;
@@ -134,11 +141,9 @@ export default {
             this.showGanttChart = true;
         },
         async selectBranchWithParams(branch, userId) {
-            console.log(this.apiUrl);
-            console.log(branch, userId);
 
             try {
-                const response = await fetch(`${this.apiUrl}/selectBranch`, {
+                const response = await fetch(`${this.apiUrl}/selectBranch?user_id=${this.userID}`, {
                     method: 'POST',
                     credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
@@ -148,7 +153,7 @@ export default {
                 const data = await response.json();
                 if (response.ok) {
                     this.userID = userId;
-                    this.showBranchModal = false; 
+                    this.showBranchModal = false;
                     this.showGanttChart = true;
                     console.log(data.message);
                 } else {
@@ -198,18 +203,18 @@ export default {
                     alert("Nenhum ficheiro selecionado.");
                     return;
                 }
-                
+
                 this.selectedFile = file;
 
                 const formData = new FormData();
                 formData.append("file", file);
 
-                const response = await fetch(`${this.apiUrl}/uploadInputFile`, {
+                const response = await fetch(`${this.apiUrl}/uploadInputFile?user_id=${this.userID}`, {
                     method: "POST",
                     credentials: 'include',
                     body: formData,
                 })
-                
+
                 const result = await response.json();
                 if (response.ok) {
                     this.criteriaModal({
@@ -229,7 +234,7 @@ export default {
             console.log("Critérios:", selectedCriteria);
             this.criteriaSelected = true;
 
-            await fetch(`${this.apiUrl}/criteria`, {
+            await fetch(`${this.apiUrl}/criteria?user_id=${this.userID}`, {
                 method: "POST",
                 credentials: 'include',
                 headers: {
@@ -299,7 +304,7 @@ export default {
             this.showRemoveMachinesModal = false;
             this.machinesRemoved = true;
 
-            fetch(`${this.apiUrl}/removeMachines`, {
+            fetch(`${this.apiUrl}/removeMachines?user_id=${this.userID}`, {
                 method: "POST",
                 credentials: 'include',
                 headers: { "Content-Type": "application/json" },
@@ -327,7 +332,7 @@ export default {
             this.showRemoveBoMsModal = false;
             this.bomsRemoved = true;
 
-            fetch(`${this.apiUrl}/removeBoMs`, {
+            fetch(`${this.apiUrl}/removeBoMs?user_id=${this.userID}`, {
                 method: "POST",
                 credentials: 'include',
                 headers: { "Content-Type": "application/json" },
@@ -348,30 +353,39 @@ export default {
                 this.criteriaSelected &&
                 (!this.selectedCriteria[0] || this.machinesRemoved) &&
                 (!this.selectedCriteria[5] || this.bomsRemoved);
-            console.log(isReady, this.selectedCriteria);
 
             if (isReady) {
-                fetch(`${this.apiUrl}/createData`, {
+                fetch(`${this.apiUrl}/createData?user_id=${this.userID}`, {
                     method: 'POST',
                     credentials: 'include',
                 })
                     .then(response => response.json())
                     .then((data) => {
-                        // Check if items with no routings and/or no BoM's exist
+                        if (!this.missingItemsData[this.userID]) {
+                            this.missingItemsData[this.userID] = {
+                                noRoutings: [],
+                                noBoms: [],
+                                shouldShow: false
+                            };
+                        }
+
+                        // Update the user's missing items
                         if (data.no_routings && data.no_routings.length > 0) {
-                            this.noRoutings = data.no_routings;
+                            this.missingItemsData[this.userID].noRoutings = data.no_routings;
                         }
 
                         if (data.no_bom && data.no_bom.length > 0) {
-                            this.noBoms = data.no_bom;
+                            this.missingItemsData[this.userID].noBoms = data.no_bom;
                         }
 
-                        if (this.noRoutings.length > 0 || this.noBoms.length > 0) {
-                            this.showMissingItemsModal = true;
+                        // Set flag to show modal for this user
+                        if (this.missingItemsData[this.userID].noRoutings.length > 0 ||
+                            this.missingItemsData[this.userID].noBoms.length > 0) {
+                            this.missingItemsData[this.userID].shouldShow = true;
                         }
 
                         this.isAlgorithmRunning = true;
-                        fetch(`${this.apiUrl}/runAlgorithm`, {
+                        fetch(`${this.apiUrl}/runAlgorithm?user_id=${this.userID}`, {
                             method: 'POST',
                             credentials: 'include',
                         })
@@ -398,49 +412,57 @@ export default {
         },
         pollAlgorithmStatus() {
             const checkStatus = () => {
-                fetch(`${this.apiUrl}/algorithmStatus`, {
+                // UserID in URL to make sure it's always available
+                fetch(`${this.apiUrl}/algorithmStatus?user_id=${this.userID}`, {
                     credentials: 'include',
                 })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.status === 'completed') {
-                        // Algorithm is done
-                        this.isAlgorithmRunning = false;
-                        this.showResultsModal = true;
-                    } else if (data.status === 'error' || data.status === 'aborted') {
-                        // Handle error
-                        this.isAlgorithmRunning = false;
-                        console.error("Algorithm failed:", data.message);
-                    } else if (data.status === 'running') {
-                        this.isAlgorithmRunning = true;
-                        // Still running, check again in 2 seconds
-                        setTimeout(checkStatus, 2000);
-                    } else {
-                        // Still running, check again in 2 seconds
-                        setTimeout(checkStatus, 2000);
-                    }
-                })
-                .catch(error => {
-                    console.error("Erro na verificação do estado do algoritmo:", error);
-                    this.isAlgorithmRunning = false;
-                });
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'completed') {
+                            this.isAlgorithmRunning = false;
+                            this.showResultsModal = true;
+                        } else if (data.status === 'error' || data.status === 'aborted') {
+                            this.isAlgorithmRunning = false;
+                            console.error("Algorithm failed:", data.message);
+                            alert("Ocorreu um erro na execução do algoritmo. Por favor tente novamente.");
+                        } else if (data.status === 'not_running') {
+                            // Algorithm is no longer running
+                            this.isAlgorithmRunning = false;
+                        } else if (data.status === 'running') {
+                            this.isAlgorithmRunning = true;
+                            // Still running, check again in 2 seconds
+                            setTimeout(checkStatus, 2000);
+                        } else {
+                            // Still running, check again in 2 seconds
+                            setTimeout(checkStatus, 2000);
+                        }
+                    })
+                    .catch(error => {
+                        console.error("Erro na verificação do estado do algoritmo:", error);
+                        if (this.isAlgorithmRunning) {
+                            setTimeout(checkStatus, 5000); // Retry with longer delay
+                            alert("Ocorreu um erro na execução do algoritmo. Por favor tente novamente.");
+                        }
+                    });
             };
 
             // Start checking
             checkStatus();
         },
         closeMissingItemsModal() {
-            this.showMissingItemsModal = false;
+            if (this.missingItemsData[this.userID]) {
+                this.missingItemsData[this.userID].shouldShow = false;
+            }
         },
         handleResultsConfirm() {
             this.showResultsModal = false;
-            fetch(`${this.apiUrl}/saveResults`, {
+            fetch(`${this.apiUrl}/saveResults?user_id=${this.userID}`, {
                 method: 'POST',
                 credentials: 'include',
             })
                 .then(response => {
                     if (!response.ok) {
-                      throw new Error("Falha no download dos ficheiros.");
+                        throw new Error("Falha no download dos ficheiros.");
                     }
                     return response.blob();  // Convert response to blob
                 })
@@ -495,7 +517,7 @@ export default {
             this.renderKey++; // Forces re-rendering of GanttChart
         },
         deleteFileRequest() {
-            fetch(`${this.apiUrl}/deleteInputFile`, {
+            fetch(`${this.apiUrl}/deleteInputFile?user_id=${this.userID}`, {
                 method: 'POST',
                 credentials: 'include',
             })
@@ -518,7 +540,8 @@ export default {
 .header {
     display: flex;
     align-items: center;
-    justify-content: space-between; /* Keeps the button on the right */
+    justify-content: space-between;
+    /* Keeps the button on the right */
     background-color: #4CAF50;
     color: white;
     padding: 10px 20px;
@@ -552,7 +575,7 @@ export default {
 }
 
 .menu-btn:hover {
-    opacity: 0.6; 
+    opacity: 0.6;
 }
 
 .create-plan-btn {

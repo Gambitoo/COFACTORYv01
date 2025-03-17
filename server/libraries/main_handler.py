@@ -88,7 +88,7 @@ def executePandS(dataHandler, PT_Settings):
         ROD.Scheduling()  # Ensure ROD.Scheduling() checks for abort periodically
         et_ROD = tm.time()
         execution_time_ROD = et_ROD - st_ROD
-        
+    
     # Step 3: Tref Scheduling
     if abort_event.is_set():
         print("Execution aborted during Tref Scheduling.")

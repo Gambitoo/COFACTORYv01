@@ -1,8 +1,7 @@
 <template>
   <div>
     <!-- Navigation buttons -->
-    <div
-      style="text-align: right; margin-right: 10px; display: flex; justify-content: flex-end; align-items: center; position: relative;">
+    <div class="filters">
       <!-- Previous and Next Week Buttons -->
       <button @click="previousWeek" :class="{ 'animate-click': isAnimating === 'previousWeek' }"
         @animationend="resetAnimation" aria-label="Previous Week">
@@ -86,6 +85,12 @@ import { startOfWeek, endOfWeek, addWeeks, subWeeks } from 'date-fns'; // Import
 ChartJS.register(Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale, TimeScale, zoomPlugin);
 
 export default {
+  props: {
+    planoId: {
+      type: String,
+      default: null // This makes the prop optional
+    }
+  },
   components: { Bar, FontAwesomeIcon },
   data() {
     return {
@@ -113,8 +118,13 @@ export default {
     }
   },
   methods: {
-    async fetchData() {
-      await resultsChartConfig.getData();
+    async fetchData(planoId) {
+      if (planoId) {
+        await resultsChartConfig.getData(planoId);
+      } else {
+        await resultsChartConfig.getData(null);
+      }
+      
       this.isDataLoaded = true;
 
       // Dynamically adjust chart height
@@ -237,12 +247,24 @@ export default {
         chartComponent.chart.resetZoom();
       }
     },
+    loadChartData() {
+      if (this.planoId) {
+        // If planoId is given, use it to load specific chart data
+        this.fetchData(this.planoId).then(() => {
+          this.originalData = JSON.parse(JSON.stringify(this.data));
+          this.originalOptions = this.options
+        });
+      } else {
+        // If no planoId, load default chart data
+        this.fetchData(null).then(() => {
+          this.originalData = JSON.parse(JSON.stringify(this.data));
+          this.originalOptions = this.options
+        });
+      }
+    }
   },
   mounted() {
-    this.fetchData().then(() => {
-      this.originalData = JSON.parse(JSON.stringify(this.data));
-      this.originalOptions = this.options
-    });
+    this.loadChartData();
   },
   watch: {
     selectedMachineTypes: {
@@ -297,5 +319,14 @@ button:hover {
   100% {
     transform: scale(1);
   }
+}
+
+.filters {
+  text-align: right;
+  margin-top: 10px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  position: relative;
 }
 </style>

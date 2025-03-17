@@ -1,8 +1,9 @@
 <template>
-    <div class="modal-backdrop">
+    <div class="modal">
         <div class="modal-content">
+            <div class="header">
             <!-- BoM List -->
-            <h2>Remover BOM's</h2>
+            <h2>Remover BOM's</h2></div>
             <div class="scroll-container">
                 <div v-for="(items, rootItem) in BoMs" :key="rootItem" class="bom-group">
                     <h3>{{ rootItem }}</h3>
@@ -41,6 +42,7 @@
         },
         methods: {
             handleSelection(rootItem, itemList, event) {
+                console.log(this.BoMs);
                 if (event.target.checked) {
                     // Add the checked BoM to itemList
                     if (!this.selectedBoMs[rootItem]) {
@@ -73,7 +75,7 @@
 </script>
 
 <style scoped>
-.modal-backdrop {
+.modal {
     position: fixed;
     top: 0;
     left: 0;
@@ -90,14 +92,18 @@
     background: white;
     padding: 20px;
     border-radius: 8px;
-    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-    width: 600px;
+    width: 70%;
     text-align: left;
+}
+
+.header {
+    border-bottom: 2px solid #eee;
 }
 
 .scroll-container {
     max-height: 550px;
     overflow-y: auto;
+    width: 100%;
 }
 
 .bom-group {

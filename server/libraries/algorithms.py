@@ -7,7 +7,7 @@ import pyodbc
 import random
 import math
 from collections import Counter, defaultdict
-from .utils import (BoM, Routings, TimeUnit, ProductionOrder, ExecutionPlan, Machines, Items, SetupTimesByMaterial)
+from .utils import (TimeUnit, Items)
 
 class RODPandS():
     def __init__(self, DataHandler):
@@ -17,7 +17,7 @@ class RODPandS():
 
     def generateSolution(self, Combination):
         '''Generates a randomized initial solution.'''
-        initial_solution = {machine.MachineCode: [] for machine in self.Machines}  # Use machine names
+        initial_solution = {machine.MachineCode: [] for machine in self.Machines if machine.IsActive}  # Use machine names
         sorted_exec_plans = sorted(Combination, key=lambda x: x.ProductionOrder.DD)
         operations = {i + 1: ep for i, ep in enumerate(sorted_exec_plans)}
 
@@ -26,7 +26,7 @@ class RODPandS():
             for routing in self.DataHandler.Routings:
                 if routing.Item == data.ItemRelated.Name:
                     for machine in self.Machines:
-                        if routing.Machine == machine.MachineCode and machine not in possible_machines:
+                        if machine.IsActive and routing.Machine == machine.MachineCode and machine not in possible_machines:
                             possible_machines.append(machine)
 
         total_operations = len(operations)
@@ -67,7 +67,7 @@ class RODPandS():
                 if op_number in op_n:
                     possible_machines = [machine for routing in self.DataHandler.Routings if
                                          routing.Item == data.ItemRelated.Name
-                                         for machine in self.Machines if routing.Machine == machine.MachineCode]
+                                         for machine in self.Machines if machine.IsActive and routing.Machine == machine.MachineCode]
                     if self.DataHandler.Criteria[1]:
                         machine_cycle_weight = {}
                         for routing in self.DataHandler.Routings:
@@ -170,7 +170,7 @@ class RODPandS():
             
         return [latest_ep_item, self.nextShiftStartTime(start_time, shift_start_times)]
 
-        # Determine previous material type
+        """# Determine previous material type
         previous_type = next((item.MaterialType for item in self.DataHandler.Items if item.Name == latest_ep_item), None)
 
         # Determine start time
@@ -184,7 +184,7 @@ class RODPandS():
                  if instance.FromMaterial == previous_type and instance.ToMaterial == current_type), 0.0)
             start_time += timedelta(hours=setup_time)
 
-        return self.nextShiftStartTime(start_time, shift_start_times)
+        return self.nextShiftStartTime(start_time, shift_start_times)"""
 
     def getSTandCoT(self, data, CT, machine_ST, previous_item_CoT, setup_time):
         data.ST = (previous_item_CoT + timedelta(hours=setup_time)) if previous_item_CoT else machine_ST
@@ -229,7 +229,7 @@ class RODPandS():
             if not operations:
                 continue
 
-            output = next(mach.Output for mach in self.Machines if mach.MachineCode == machine)
+            output = next(mach.Output for mach in self.Machines if mach.IsActive and mach.MachineCode == machine)
 
             # Only proceed if the machine has multiple batches (i.e., list of lists)
             if isinstance(operations[0], list):
@@ -316,7 +316,6 @@ class RODPandS():
                     exec_plan.id == op[1].id for _, operations in self.DataHandler.RODSolution.items() for op_pair
                     in operations for op in (op_pair if isinstance(op_pair[0], list) else [op_pair]))
                 if not exec_plan_found:
-                    #print(exec_plan.ItemRelated.Name, exec_plan.Machine, exec_plan.ItemRelated.Process)
                     plans_to_exclude.append(exec_plan.id)
 
         for ep_id in plans_to_exclude:
@@ -385,18 +384,15 @@ class TrefPandS():
     def Planning(self):
         """Get the allocation of the tref items throughout the machines, get the CT (Completion Time) of each Execution Plan,
         order the calculated solutions by average DD (Due Date), and finally create the Time Units and assign the according ST, ET and CT"""
-        #st = tm.time()
         best_solutions = self.execPlanCombinations()
-        #et = tm.time()
-        #print("Tref Time: ", et-st)
-
+        
         plans_to_exclude = []
         for exec_plan in self.DataHandler.ExecutionPlans:
             exec_plan_found = False
             for solutions in best_solutions:
                 for solution in solutions:
                     for machine in self.Machines:
-                        if (exec_plan.id in solution["allocated_exec_plans"][machine.MachineCode] or
+                        if machine.IsActive and (exec_plan.id in solution["allocated_exec_plans"][machine.MachineCode] or
                                 exec_plan.ItemRelated.Process == "BUN"):
                             exec_plan_found = True
                             if exec_plan.id in plans_to_exclude:
@@ -411,7 +407,7 @@ class TrefPandS():
             for _, solution in enumerate(solutions):
                 for machine in self.Machines:
                     TUCount = 0
-                    if solution["individual_weights_POs"][machine.MachineCode]:
+                    if machine.IsActive and solution["individual_weights_POs"][machine.MachineCode]:
                         timeUnit = TimeUnit(machine.MachineCode)
                         self.DataHandler.TimeUnits.append(timeUnit)
                         for exec_plan in self.DataHandler.ExecutionPlans:
@@ -490,9 +486,10 @@ class TrefPandS():
             ST_TU, item_count_dict = {}, {}
             # Extract initial CoT for the first time unit in each machine
             for machine in self.Machines:
-                TU_list = [tu for tu in self.DataHandler.TimeUnits if machine.MachineCode == tu.Machine]
-                if not TU_list:
-                    continue
+                if machine.IsActive:
+                    TU_list = [tu for tu in self.DataHandler.TimeUnits if machine.MachineCode == tu.Machine]
+                    if not TU_list:
+                        continue
 
                 sorted_tu_list = sort_time_units(TU_list, machine.MachineCode)
 
@@ -555,9 +552,10 @@ class TrefPandS():
                 update_exec_plan(exec_plan_dict, TU)
         else:
             for machine in self.Machines:
-                TU_list = [tu for tu in self.DataHandler.TimeUnits if machine.MachineCode == tu.Machine]
-                if not TU_list:
-                    continue
+                if machine.IsActive:
+                    TU_list = [tu for tu in self.DataHandler.TimeUnits if machine.MachineCode == tu.Machine]
+                    if not TU_list:
+                        continue
 
                 previous_TU = None
                 sorted_tu_list = sort_time_units(TU_list, machine.MachineCode)
@@ -569,26 +567,26 @@ class TrefPandS():
             for TU in self.DataHandler.TimeUnits:
                 update_exec_plan(exec_plan_dict, TU)
 
-    def calculateTrefST(self, ROD_items, item_count, current_count, input_data):
+    def calculateTrefST(self, ROD_items, item_count, current_count, data_handler):
         Max_CoT = self.DataHandler.CurrentTime.replace(hour=0, minute=0, second=0, microsecond=0)
         item_count_aux = {}
         for _, (item, qty) in enumerate(ROD_items.items()):
             machines_with_item = {}
             # Identify machines that contain the item
-            for x, (mach_name, operations) in enumerate(input_data.RODSolution.items()):
+            for x, (mach_name, operations) in enumerate(data_handler.RODSolution.items()):
                 for op_pair in operations:
                     if isinstance(op_pair[0], list):
                         for op in op_pair:
                             if op[1].ItemRelated.Name == item:
                                 if mach_name not in machines_with_item:
-                                    mach = next((m for m in self.DataHandler.Machines if m.MachineCode == mach_name), None)
+                                    mach = next((m for m in self.DataHandler.RODMachines if m.IsActive and m.MachineCode == mach_name), None)
                                     if mach:
                                         machines_with_item[mach] = x
                                         break
                     else:
                         if op_pair[1].ItemRelated.Name == item:
                             if mach_name not in machines_with_item:
-                                mach = next((m for m in self.DataHandler.Machines if m.MachineCode == mach_name), None)
+                                mach = next((m for m in self.DataHandler.RODMachines if m.IsActive and m.MachineCode == mach_name), None)
                                 if mach:
                                     machines_with_item[mach] = x
                                     break
@@ -602,20 +600,20 @@ class TrefPandS():
                 for idx in range(remaining_qty):
                     temp_results[idx % len(temp_results)] += 1
 
-                results = [0] * len(self.DataHandler.RODMachines)
+                results = [0] * len([machine for machine in self.DataHandler.RODMachines if machine.IsActive])
                 for idx, mach_name in enumerate(machines_with_item.values()):
                     results[mach_name] = temp_results[idx]
 
                 item_count_aux[item] = results
-                current_count[item] = [0] * len(self.DataHandler.RODMachines)
+                current_count[item] = [0] * len([machine for machine in self.DataHandler.RODMachines if machine.IsActive])
             else:
                 for ROD_item in self.DataHandler.Items:
                     if item == ROD_item.Name:
-                        current_counts = item_count.get(item, [0] * len(self.DataHandler.RODMachines))
+                        current_counts = item_count.get(item, [0] * len([machine for machine in self.DataHandler.RODMachines if machine.IsActive]))
                         item_count_aux[item] = [y for x, y in enumerate(current_counts)]
 
-            for j, (mach, operations) in enumerate(input_data.RODSolution.items()):
-                iter = current_count.get(item, [0] * len(self.DataHandler.RODMachines))[j]
+            for j, (mach, operations) in enumerate(data_handler.RODSolution.items()):
+                iter = current_count.get(item, [0] * len([machine for machine in self.DataHandler.RODMachines if machine.IsActive]))[j]
                 count = 0
                 while count < item_count_aux[item][j]:
                     if iter >= len(operations):
@@ -904,9 +902,10 @@ class TrefPandS():
         }
 
         for machine in self.Machines:
-            data["bins"].append(machine.MachineCode)
-            data["bin_capacities"].append(machine.Input)
-            data["output_capacities"].append(machine.Output)
+            if machine.IsActive:
+                data["bins"].append(machine.MachineCode)
+                data["bin_capacities"].append(machine.Input)
+                data["output_capacities"].append(machine.Output)
 
         combined_weights, combined_values, weights_names, weights_PO, exec_plan_ids = self.combineItems(
             combination_copy)
@@ -935,7 +934,7 @@ class TrefPandS():
             all_items, self.DataHandler.Routings, data["bins"], data["all_bins"]
         )
 
-        machine_completion_times = {machine.MachineCode: 0 for machine in self.Machines}
+        machine_completion_times = {machine.MachineCode: 0 for machine in self.Machines if machine.IsActive}
         excluded_machines = set()
 
         while combination_copy:
@@ -976,14 +975,15 @@ class TrefPandS():
                 to_remove = []
                 for exec_plan in combination_copy:
                     for machine in self.Machines:
-                        allocated_exec_plans = solution["allocated_exec_plans"][machine.MachineCode]
-                        if exec_plan.id in allocated_exec_plans:
-                            to_remove.append(exec_plan)
-                            # Update machine's completion time
-                            machine_completion_times[machine.MachineCode] += sum(
-                                cycle_times[exec_plan.ItemRelated.Name][
-                                    data["bins"].index(machine.MachineCode)] * exec_plan.Quantity
-                                for exec_plan in combination_copy if exec_plan.id in allocated_exec_plans)
+                        if machine.IsActive:
+                            allocated_exec_plans = solution["allocated_exec_plans"][machine.MachineCode]
+                            if exec_plan.id in allocated_exec_plans:
+                                to_remove.append(exec_plan)
+                                # Update machine's completion time
+                                machine_completion_times[machine.MachineCode] += sum(
+                                    cycle_times[exec_plan.ItemRelated.Name][
+                                        data["bins"].index(machine.MachineCode)] * exec_plan.Quantity
+                                    for exec_plan in combination_copy if exec_plan.id in allocated_exec_plans)
 
                 # Temporarily exclude machines exceeding the threshold
                 active_completion_times = [comp_time for comp_time in machine_completion_times.values() if
@@ -1171,7 +1171,7 @@ class TorcPandS():
             if routing.Item not in routings_cache:
                 routings_cache[routing.Item] = []
             for machine in self.Machines:
-                if routing.Machine == machine.MachineCode:
+                if machine.IsActive and routing.Machine == machine.MachineCode:
                     routings_cache[routing.Item].append(machine)
         return routings_cache
 
@@ -1293,7 +1293,7 @@ class TorcPandS():
             return [m for r in self.DataHandler.Routings if r.Item == exec_plan.ItemRelated.Name
                     for m in self.Machines if r.Machine == m.MachineCode]
 
-        initial_solution = {machine.MachineCode: [] for machine in self.Machines}
+        initial_solution = {machine.MachineCode: [] for machine in self.Machines if machine.IsActive}
         special_case_items = [ep.ItemRoot.Name for ep in self.DataHandler.ExecutionPlans if
                               ep.ItemRoot and ep.ItemRelated.Process == "BUN"]
         exec_plans = [ep for ep in self.DataHandler.ExecutionPlans if ep.ItemRelated.Process == "BUN" and ep.ItemRelated.Name
@@ -1310,7 +1310,6 @@ class TorcPandS():
             if product_key not in product_batches:
                 product_batches[product_key] = []
             product_batches[product_key].append(op_number)
-            #print(op_number)
                 
         if self.DataHandler.Database == 'COFACTORY_GR':
             max_ct = 0
@@ -1632,7 +1631,7 @@ class TorcPandS():
 
             # Cool down the temperature
             temperature *= alpha
-
+        
         # Calculate max CoT for each machine and sort best_solution
         machine_max_CoT = {
             machine: max((data[3] for _, data in ops),
@@ -1750,7 +1749,7 @@ class TorcPandS():
                     # Ensure valid start and completion times
                     data[2], data[3] = ST, CoT
                     previous_item_CoT, previous_type = CoT, current_type
-                    
+        
         printed_prod_orders = set()
         for machine, operations in best_solution.items():
             for op in operations:
@@ -1779,4 +1778,5 @@ class TorcPandS():
 
                     # Mark this production order as printed
                     printed_prod_orders.add(prod_order.id)
+        
 
