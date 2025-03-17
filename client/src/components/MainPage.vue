@@ -54,8 +54,6 @@ import ResultsModal from "@/components/ResultsModal.vue";
 import MissingItemsModal from "@/components/MissingItemsModal.vue";
 //import BranchSelectionModal from "@/components/BranchSelectionModal.vue";
 import PlanHistoryPage from "@/components/PlanHistoryPage.vue";
-import type { OnClickOutsideHandler } from '@vueuse/core'
-import { shallowRef } from 'vue'
 
 export default {
     components: { GanttChart, CriteriaModal, RemoveMachinesModal, RemoveBoMsModal, ResultsModal, MissingItemsModal, PlanHistoryPage },
@@ -83,9 +81,7 @@ export default {
             isAlgorithmRunning: false,
             renderKey: 0,
             menuOpen: false,
-            apiUrl: import.meta.env.VITE_FLASK_HOST
-                ? `http://${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`
-                : 'http://localhost:5001',
+            apiUrl: `${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`,
         };
     },
     mounted() {
