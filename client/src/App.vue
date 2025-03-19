@@ -2,7 +2,7 @@
   <div v-html="htmlHeader"></div>
   <RouterView />
   <div v-html="htmlFooter"></div>
-  </template>
+</template>
    
   <script setup>
   import { RouterView } from 'vue-router'

@@ -2,7 +2,7 @@ import { ref, reactive } from 'vue';
 import axios from 'axios';
 import { startOfWeek, endOfWeek } from 'date-fns';
 
-const apiUrl = `${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`;
+const apiUrl = `http://${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`;
 
 export const machines = ref([]);
 const exec_plans = ref([]);
@@ -20,7 +20,7 @@ export const options = reactive({
       right: 100,
     },
   },
-  
+
   indexAxis: 'y',
   scales: {
     x: {
@@ -61,13 +61,13 @@ export const options = reactive({
       yAlign: 'bottom',
       callbacks: {
         label: function (context) {
-          const startTime = context.raw?.x[0]; 
-          const endTime = context.raw?.x[1];   
-          const itemRelated = context.raw?.name; 
+          const startTime = context.raw?.x[0];
+          const endTime = context.raw?.x[1];
+          const itemRelated = context.raw?.name;
           const itemRoot = context.raw?.root;
           const quantity = context.raw?.quantity;
           const orderInc = context.raw?.orderInc;
-    
+
           // Format the tooltip string
           return [
             `Root: ${itemRoot}`,
@@ -75,7 +75,7 @@ export const options = reactive({
             `Start Time: ${new Date(startTime).toLocaleString()}`,
             `End Time: ${new Date(endTime).toLocaleString()}`,
             `Quantity: ${quantity}`,
-            `Reels: ${quantity/orderInc}`
+            `Reels: ${quantity / orderInc}`
           ];
         },
       },
@@ -91,36 +91,40 @@ export const options = reactive({
   },
 });
 
-const generateColor = (index, isBorder = false) => {
-  const colors = ['#42A5F5', '#FF7043', '#FFCA28', '#66BB6A', '#AB47BC'];
-  const baseColor = colors[index % colors.length]; // Cycle through colors
-  return isBorder ? shadeColor(baseColor, -20) : baseColor;
+// Create a better color generation function
+const generateDistinctColor = (index) => {
+  // Use golden ratio for better distribution
+  const goldenRatioConjugate = 0.618033988749895;
+
+  // Start with a random hue and use golden ratio to get distinct colors
+  let hue = (index * goldenRatioConjugate) % 1;
+
+  // Vary saturation and lightness slightly based on index for even more distinction
+  const saturation = 65 + (index % 3) * 8; // Vary between 65-85%
+  const lightness = 55 + (index % 5) * 2;  // Vary between 55-70%
+
+  return `hsl(${Math.floor(hue * 360)}, ${saturation}%, ${lightness}%)`;
 };
 
-// Utility function to darken/lighten colors
-const shadeColor = (color, percent) => {
-  let num = parseInt(color.slice(1), 16),
-    amt = Math.round(2.55 * percent),
-    R = (num >> 16) + amt,
-    G = ((num >> 8) & 0x00ff) + amt,
-    B = (num & 0x0000ff) + amt;
-  return (
-    '#' +
-    (0x1000000 + (R < 255 ? (R < 1 ? 0 : R) : 255) * 0x10000 +
-      (G < 255 ? (G < 1 ? 0 : G) : 255) * 0x100 +
-      (B < 255 ? (B < 1 ? 0 : B) : 255))
-      .toString(16)
-      .slice(1)
-  );
+// Function to generate border color
+const generateBorderColor = (color) => {
+  const hslMatch = color.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
+  if (hslMatch) {
+    const [_, h, s, l] = hslMatch;
+    // Darker border 
+    return `hsl(${h}, ${s}%, ${Math.max(30, Number(l) - 15)}%)`;
+  }
+  return color;
 };
 
 export const getData = async (planoId) => {
   const path = `${apiUrl}/getNewChartData`;
   try {
-    const res = await axios.get(path, { 
+    const res = await axios.get(path, {
       params: { planoId },
       headers: { 'Content-Type': 'application/json' },
-      withCredentials: true });
+      withCredentials: true
+    });
     exec_plans.value = res.data.exec_plans;
     new_exec_plans.value = res.data.new_exec_plans;
     machines.value = res.data.machines;
@@ -137,7 +141,7 @@ export const getData = async (planoId) => {
       const typeOrderB = getTypeOrder(b.name);
 
       if (typeOrderA !== typeOrderB) {
-        return typeOrderA - typeOrderB; 
+        return typeOrderA - typeOrderB;
       }
 
       // If machines are the same, sort numerically
@@ -151,15 +155,21 @@ export const getData = async (planoId) => {
 
     data.datasets.splice(0, data.datasets.length); // Clear existing data
 
-    const colorMap = new Map(); 
-    let colorIndex = 0; // Track the current color index
+    // Create a better item to color mapping
+    const uniqueItems = [...new Set(exec_plans.value.map(plan => plan.itemRelated))];
+    const colorMap = new Map();
+
+    // Pre-generate colors for all unique items
+    uniqueItems.forEach((item, index) => {
+      colorMap.set(item, generateDistinctColor(index));
+    });
 
     let dt = {
       label: "Plano",
       fill: false,
       data: [],
-      backgroundColor: [], 
-      borderColor: [], 
+      backgroundColor: [],
+      borderColor: [],
       barPercentage: 0.8,
     };
 
@@ -190,7 +200,7 @@ export const getData = async (planoId) => {
       // Override the color to a greyish shade
       const greyColor = "#B0BEC5"; // Light grey (you can adjust this)
       const greyBorderColor = "#78909C"; // Darker grey for the border
-        
+
       dt.backgroundColor.push(greyColor);
       dt.borderColor.push(greyBorderColor);
     });
@@ -216,14 +226,9 @@ export const getData = async (planoId) => {
       };
       dt.data.push(data);
 
-      // Set up the colors for each bar
-      if (!colorMap.has(plan.itemRelated)) {
-        colorMap.set(plan.itemRelated, generateColor(colorIndex++));
-      }
       const color = colorMap.get(plan.itemRelated);
-
-      dt.backgroundColor.push(color); // Use the mapped color
-      dt.borderColor.push(shadeColor(color, -20)); // Use a darker shade for the border
+      dt.backgroundColor.push(color);
+      dt.borderColor.push(generateBorderColor(color));
     });
     data.datasets.push(dt);
 

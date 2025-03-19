@@ -18,17 +18,7 @@
 
       <!-- Filters Dropdown Menu -->
       <transition name="fade">
-        <div v-if="showFilters" style="
-              position: absolute;
-              top: 40px;
-              right: 10px;
-              background: white;
-              box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
-              border: 1px solid #ddd;
-              border-radius: 5px;
-              padding: 10px;
-              z-index: 1000;
-            ">
+        <div v-if="showFilters" class="filter-menu">
           <!-- Additional Filters -->
           <div style="margin-bottom: 10px;">
             <label style="font-weight: bold;">Filtrar por Processo</label>
@@ -56,9 +46,9 @@
     </div>
 
     <!-- Gantt Chart -->
-    <div :style="{ height: chartHeight + 'px', overflowY: 'auto' }" @dblclick="resetZoom">
+    <div class="chart-container" @dblclick="resetZoom">
       <Bar v-if="isDataLoaded" ref="ganttChart" :data="data" :options="options" />
-      <p v-else>A carregar dados...</p>
+      <p v-else class="loading-text">A carregar dados...</p>
     </div>
   </div>
 </template>
@@ -99,9 +89,9 @@ export default {
       data: resultsChartConfig.data,
       options: resultsChartConfig.options,
       isDataLoaded: false, // Track loading state
-      chartHeight: null as any,
-      baseHeight: null as any,
-      padding: null as any,
+      chartHeight: 0,
+      baseHeight: 40, // Height per machine
+      padding: 100,
       currentWeekRange: {
         start: null as Date | null,
         end: null as Date | null,
@@ -111,30 +101,62 @@ export default {
       isAnimating: null as any, // Tracks which button is being animated
     };
   },
+  mounted() {
+    // Window resize listener to adjust the chart height
+    window.addEventListener('resize', this.handleResize);
+    // Get all the items and machines to populate the chart
+    this.loadChartData();
+    // Initial height calculation
+    this.updateChartHeight();
+  },
+  beforeDestroy() {
+    window.removeEventListener('resize', this.handleResize);
+  },
   computed: {
     // Check if there are machines that start with "ROD"
     hasRODMachines() {
-      return this.originalOptions.scales.y.labels.some((label) => label && label.startsWith('ROD'));
+      return this.originalOptions?.scales?.y?.labels?.some((label) => label && label.startsWith('ROD')) || false;
     }
   },
   methods: {
     async fetchData(planoId) {
-      if (planoId) {
-        await resultsChartConfig.getData(planoId);
-      } else {
-        await resultsChartConfig.getData(null);
+      try {
+        if (planoId) {
+          await resultsChartConfig.getData(planoId);
+        } else {
+          await resultsChartConfig.getData(null);
+        }
+        this.isDataLoaded = true;
+
+        // Update chart height based on data
+        this.updateChartHeight();
+
+        // Initialize week range
+        const today = new Date();
+        this.setWeekRange(today);
+      } catch (error) {
+        console.error("Error loading chart data:", error);
+        this.isDataLoaded = false;
       }
-      
-      this.isDataLoaded = true;
+    },
+    updateChartHeight() {
+      // Calculate height based on number of machines or a minimum to fill the screen
+      const machineCount = this.options?.scales?.y?.labels?.length || 0;
+      const machineBasedHeight = machineCount * this.baseHeight + this.padding;
 
-      // Dynamically adjust chart height
-      this.baseHeight = 40; // Height per machine
-      this.padding = 100; // Extra padding
-      this.chartHeight = resultsChartConfig.machines.value.length * this.baseHeight + this.padding;
+      // Get viewport height (minus space for header, navigation, etc)
+      const viewportHeight = window.innerHeight - 250; // Adjusted to leave some space for other UI elements
 
-      // Initialize week range
-      const today = new Date();
-      this.setWeekRange(today);
+      // Use the larger of the two values to ensure minimum height
+      this.chartHeight = Math.max(machineBasedHeight, viewportHeight);
+
+      // Apply the height to the chart container
+      this.$nextTick(() => {
+        const chartContainer = this.$el.querySelector('.chart-container');
+        if (chartContainer) {
+          chartContainer.style.height = `${this.chartHeight}px`;
+        }
+      });
     },
     toggleFilters() {
       this.triggerButtonAnimation('toggleFilters');
@@ -178,13 +200,13 @@ export default {
       }
     },
     filterbyMachine() {
+      if (!this.originalData || !this.originalOptions) return;
+
       // Ensure selectedMachineTypes are sorted by the desired order
       this.selectedMachineTypes = this.selectedMachineTypes.sort((a, b) => {
         const order = ['ROD', 'MDW', 'BUN'];
         return order.indexOf(a) - order.indexOf(b);
       });
-
-      console.log(this.originalData.datasets[0].data);
 
       // Filter datasets based on selected machine types
       const filteredDatasets = this.originalData.datasets[0].data.filter((dataset) =>
@@ -201,8 +223,18 @@ export default {
         filteredMachines.filter((machine) => machine.startsWith(type))
       );
 
-      this.chartHeight = sortedFilteredMachines.length * this.baseHeight + this.padding;
+      // Update chart height based on visible machines
+      const machineBasedHeight = sortedFilteredMachines.length * this.baseHeight + this.padding;
+      const viewportHeight = window.innerHeight - 250;
+      this.chartHeight = Math.max(machineBasedHeight, viewportHeight);
+      this.$nextTick(() => {
+        const chartContainer = this.$el.querySelector('.chart-container');
+        if (chartContainer) {
+          chartContainer.style.height = `${this.chartHeight}px`;
+        }
+      });
 
+      // Get the right colors for the filtered datasets
       const filterColors = [];
       for (let i = 0; i < filteredDatasets.length; i++) {
         const result = this.originalData.datasets[0].data.indexOf(filteredDatasets[i]);
@@ -233,6 +265,9 @@ export default {
         },
       };
     },
+    handleResize() {
+      this.updateChartHeight();
+    },
     triggerButtonAnimation(buttonName: string) {
       this.isAnimating = buttonName; // Set the button being animated
     },
@@ -248,23 +283,14 @@ export default {
       }
     },
     loadChartData() {
-      if (this.planoId) {
-        // If planoId is given, use it to load specific chart data
-        this.fetchData(this.planoId).then(() => {
+      this.fetchData(this.planoId).then(() => {
+        if (this.data && this.options) {
+          // Store original data for filtering operations
           this.originalData = JSON.parse(JSON.stringify(this.data));
-          this.originalOptions = this.options
-        });
-      } else {
-        // If no planoId, load default chart data
-        this.fetchData(null).then(() => {
-          this.originalData = JSON.parse(JSON.stringify(this.data));
-          this.originalOptions = this.options
-        });
-      }
+          this.originalOptions = JSON.parse(JSON.stringify(this.options));
+        }
+      });
     }
-  },
-  mounted() {
-    this.loadChartData();
   },
   watch: {
     selectedMachineTypes: {
@@ -273,11 +299,55 @@ export default {
       },
       deep: true,
     },
+    planoId: {
+      handler(newPlanoId) {
+        if (newPlanoId) {
+          this.loadChartData();
+        }
+      },
+      immediate: true
+    }
   },
 };
 </script>
 
 <style scoped>
+.filters {
+  text-align: right;
+  margin: 5px 5px 15px 5px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  position: relative;
+}
+
+.filter-menu {
+  position: absolute;
+  top: 50px;
+  right: 5px;
+  background: white;
+  box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  padding: 10px;
+  z-index: 1000;
+}
+
+.chart-container {
+  position: relative;
+  overflow-y: auto;
+  min-height: 400px;
+  /* Fallback minimum height */
+  border-radius: 5px;
+  background-color: #fcfcfc;
+}
+
+.loading-text {
+  margin-left: 20px;
+  padding: 20px;
+  color: #666;
+}
+
 button {
   background: none;
   cursor: pointer;
@@ -319,14 +389,5 @@ button:hover {
   100% {
     transform: scale(1);
   }
-}
-
-.filters {
-  text-align: right;
-  margin-top: 10px;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  position: relative;
 }
 </style>

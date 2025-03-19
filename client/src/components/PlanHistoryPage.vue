@@ -1,79 +1,87 @@
 <template>
   <div class="plan-history">
     <h2>Histórico de Planos</h2>
-    <table>
-      <thead>
-        <tr>
-          <th>Utilizador</th>
-          <th>
-            Tempo de Início
-            <button @click="sortBy('ST')" :class="'sort'">
-              <font-awesome-icon icon="sort" />
-            </button>
-          </th>
-          <th>
-            Tempo de Conclusão
-            <button @click="sortBy('CoT')" :class="'sort'">
-              <font-awesome-icon icon="sort" />
-            </button>
-          </th>
-          <th>Critérios</th>
-          <th>Ficheiro Input</th>
-          <th>Ficheiros Output</th>
-          <th>Plano</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="(plan, index) in paginatedPlans" :key="index">
-          <td>{{ plan.user_id }}</td>
-          <td>{{ formatDate(plan.ST) }}</td>
-          <td>{{ formatDate(plan.CoT) }}</td>
-          <td>
-            <div class="button-container">
-              <button @click="openCriteriaModal(plan.criteria)">
-                Ver Critérios
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>Utilizador</th>
+            <th>
+              Tempo de Início
+              <button @click="sortBy('ST')" :class="'sort'">
+                <font-awesome-icon icon="sort" />
               </button>
-            </div>
-          </td>
-          <td>
-            <div class="button-container">
-              <button v-for="(file, idx) in plan.inputFiles" :key="idx" @click="downloadFile(file)">
-                Download
+            </th>
+            <th>
+              Tempo de Conclusão
+              <button @click="sortBy('CoT')" :class="'sort'">
+                <font-awesome-icon icon="sort" />
               </button>
-            </div>
-          </td>
-          <td>
-            <div class="button-container">
-              <button v-for="(file, idx) in plan.outputFiles" :key="idx" @click="downloadFile(file)">
-                Download
-              </button>
-            </div>
-          </td>
-          <td>
-            <div class="button-container">
-              <button @click="openGanttModal(plan)">
-                Ver Plano
-              </button>
-            </div>
-          </td>
-        </tr>
-      </tbody>
-    </table>
-
-    <!-- Pagination controls -->
-    <div class="pagination">
-      <button @click="changePage(currentPage - 1)" :disabled="currentPage === 1" class="page-button">
-        <font-awesome-icon icon="arrow-left" />
-      </button>
-      <span class="page-info">
-        Página {{ currentPage }} de {{ totalPages }}
-      </span>
-      <button @click="changePage(currentPage + 1)" :disabled="currentPage === totalPages" class="page-button">
-        <font-awesome-icon icon="arrow-right" />
-      </button>
+            </th>
+            <th>Critérios</th>
+            <th>Ficheiro Input</th>
+            <th>Ficheiros Output</th>
+            <th>Plano</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(plan, index) in paginatedPlans" :key="index">
+            <td>{{ plan.user_id }}</td>
+            <td>{{ formatDate(plan.ST) }}</td>
+            <td>{{ formatDate(plan.CoT) }}</td>
+            <td>
+              <div class="button-container">
+                <button @click="openCriteriaModal(plan.criteria)">
+                  Ver Critérios
+                </button>
+              </div>
+            </td>
+            <td>
+              <div class="button-container">
+                <button v-for="(file, idx) in plan.inputFiles" :key="idx" @click="downloadFile(file)">
+                  Download
+                </button>
+              </div>
+            </td>
+            <td>
+              <div class="button-container">
+                <button v-for="(file, idx) in plan.outputFiles" :key="idx" @click="downloadFile(file)">
+                  Download
+                </button>
+              </div>
+            </td>
+            <td>
+              <div class="button-container">
+                <button @click="openGanttModal(plan)">
+                  Ver Plano
+                </button>
+              </div>
+            </td>
+          </tr>
+          <!-- Spacer rows to fill empty space -->
+          <tr v-if="paginatedPlans.length < 5" v-for="i in (5 - paginatedPlans.length)" :key="`empty-${i}`" class="empty-row">
+            <td colspan="7">&nbsp;</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
 
-    <button class="close-btn" @click="$emit('close')">Fechar</button>
+    <div class="controls-footer">
+      <!-- Pagination controls -->
+      <div class="pagination">
+        <button @click="changePage(currentPage - 1)" :disabled="currentPage === 1" class="page-button">
+          <font-awesome-icon icon="arrow-left" />
+        </button>
+        <span class="page-info">
+          Página {{ currentPage }} de {{ totalPages }}
+        </span>
+        <button @click="changePage(currentPage + 1)" :disabled="currentPage === totalPages" class="page-button">
+          <font-awesome-icon icon="arrow-right" />
+        </button>
+      </div>
+
+      <button class="close-btn" @click="$emit('close')">Fechar</button>
+    </div>
 
     <div v-if="showCriteriaModal" class="modal">
       <div class="criteria-container">
@@ -146,14 +154,14 @@ export default {
       showCriteriaModal: false,
       selectedPlan: null,
       criteria: null,
-      apiUrl: `${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`,
+      apiUrl: `http://${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`,
       currentPage: 1,
       itemsPerPage: 10,
     };
   },
   computed: {
     totalPages() {
-      return Math.ceil(this.plans.length / this.itemsPerPage);
+      return Math.max(1, Math.ceil(this.plans.length / this.itemsPerPage));
     },
     paginatedPlans() {
       const startIndex = (this.currentPage - 1) * this.itemsPerPage;
@@ -163,15 +171,30 @@ export default {
   },
   async mounted() {
     await this.fetchPlanHistory();
+    this.updateContentHeight();
+    window.addEventListener('resize', this.updateContentHeight);
+  },
+  beforeDestroy() {
+    window.removeEventListener('resize', this.updateContentHeight);
   },
   methods: {
-    totalPages() {
-      return Math.ceil(this.plans.length / this.itemsPerPage);
-    },
-    paginatedPlans() {
-      const startIndex = (this.currentPage - 1) * this.itemsPerPage;
-      const endIndex = startIndex + this.itemsPerPage;
-      return this.plans.slice(startIndex, endIndex);
+    updateContentHeight() {
+      this.$nextTick(() => {
+        const windowHeight = window.innerHeight;
+        const planHistoryElement = this.$el;
+        const headerHeight = planHistoryElement.querySelector('h2').clientHeight;
+        const controlsHeight = planHistoryElement.querySelector('.controls-footer').clientHeight;
+        const padding = 40;
+
+        // Calculate the available height for the table wrapper
+        const availableHeight = windowHeight - headerHeight - controlsHeight - padding;
+        
+        // Set the min-height for the table wrapper
+        const tableWrapper = planHistoryElement.querySelector('.table-wrapper');
+        if (tableWrapper) {
+          tableWrapper.style.minHeight = `${availableHeight}px`;
+        }
+      });
     },
     async fetchPlanHistory() {
       try {
@@ -183,6 +206,7 @@ export default {
           this.plans = await response.json();
           // Reset to first page whenever data changes
           this.currentPage = 1;
+          this.$nextTick(() => this.updateContentHeight());
         } else {
           alert("Erro ao obter histórico de planos.");
         }
@@ -404,15 +428,34 @@ export default {
 
 <style scoped>
 .plan-history {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   padding: 20px;
   background: white;
   border-radius: 10px;
   box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+  box-sizing: border-box;
+}
+
+.table-wrapper {
+  flex: 1;
+  overflow-y: auto;
+  margin-bottom: 20px;
+  display: flex;
+  flex-direction: column;
+  min-height: 400px; 
+  border-radius: 5px;
 }
 
 table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: auto;
+}
+
+tbody {
+  flex: 1;
 }
 
 th,
@@ -423,8 +466,22 @@ td {
   text-align: center;
 }
 
+.empty-row td {
+  border-bottom: 1px solid #f5f5f5;
+  border-top: 1px solid #f5f5f5;
+}
+
 th {
   background-color: #f4f4f4;
+  top: 0;
+  z-index: 10;
+}
+
+.controls-footer {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
 button {
@@ -455,9 +512,15 @@ button:hover {
 .close-btn {
   border: none;
   border-radius: 5px;
-  margin-top: 15px;
+  padding: 8px 20px;
   background: #d9534f;
   transition: 0.3s;
+  font-weight: bold;
+  font-size: 16px;
+}
+
+.close-btn:hover {
+  background: #c9302c;
 }
 
 button.sort {
@@ -589,7 +652,7 @@ ul {
   display: flex;
   justify-content: center;
   align-items: center;
-  margin-top: 20px;
+  margin: 15px 0;
   gap: 15px;
 }
 
@@ -620,18 +683,10 @@ ul {
   background-color: #f9f9f9;
 }
 
-/* Optional: Add page number buttons if you want to jump to specific pages */
-.page-number {
-  padding: 5px 10px;
-  margin: 0 2px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.page-number.active {
-  background-color: #4CAF50;
-  color: white;
-  border-color: #4CAF50;
+h2 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  color: #333;
+  font-size: 28px;
 }
 </style>

@@ -1,8 +1,7 @@
 <template>
   <div>
     <!-- Navigation buttons -->
-    <div
-      style="text-align: right; margin-right: 10px; display: flex; justify-content: flex-end; align-items: center; position: relative;">
+    <div class="filters">
       <!-- Previous and Next Week Buttons -->
       <button @click="previousWeek" :class="{ 'animate-click': isAnimating === 'previousWeek' }"
         @animationend="resetAnimation" aria-label="Previous Week">
@@ -23,17 +22,7 @@
 
       <!-- Filters Dropdown Menu -->
       <transition name="fade">
-        <div v-if="showFilters" style="
-            position: absolute;
-            top: 50px;
-            right: 5px;
-            background: white;
-            box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
-            border: 1px solid #ddd;
-            border-radius: 5px;
-            padding: 10px;
-            z-index: 1000;
-          ">
+        <div v-if="showFilters" class="filter-menu">
           <!-- Date Filter -->
           <div style="margin-bottom: 10px;">
             <label for="date-filter" style="display: block; font-weight: bold; margin-bottom: 5px;">
@@ -78,6 +67,7 @@
 <script lang="ts">
 import { Bar } from 'vue-chartjs';
 import * as chartConfig from './chartConfig.js';
+import { FontAwesomeIcon } from '@fortawesome/vue-fontawesome';
 
 import {
   Chart as ChartJS,
@@ -96,7 +86,7 @@ import { startOfWeek, endOfWeek, addWeeks, subWeeks } from 'date-fns'; // Import
 ChartJS.register(Title, Tooltip, Legend, BarElement, CategoryScale, LinearScale, TimeScale, zoomPlugin);
 
 export default {
-  components: { Bar },
+  components: { Bar, FontAwesomeIcon },
   props: {
     isLoading: {
       type: Boolean,
@@ -123,6 +113,18 @@ export default {
       isAlgorithmRunning: false,
     };
   },
+  mounted() {
+    // Window resize listener to adjust the chart height, in case the window size changes
+    window.addEventListener('resize', this.handleResize);
+    // Get all the items and machines to populate the chart
+    this.fetchData().then(() => {
+      this.originalData = JSON.parse(JSON.stringify(this.data));
+      this.originalOptions = this.options
+    });
+  },
+  beforeDestroy() {
+    window.removeEventListener('resize', this.handleResize);
+  },
   computed: {
     hasRODMachines() {
       return this.originalOptions.scales.y.labels.some((label) => label && label.startsWith('ROD'));
@@ -136,8 +138,15 @@ export default {
 
         // Dynamically adjust chart height
         this.baseHeight = 40; // Height per machine
-        this.padding = 100; // Extra padding
-        this.chartHeight = chartConfig.machines.value.length * this.baseHeight + this.padding;
+        this.padding = 100;
+        // Calculate height based on machines
+        const machineBasedHeight = chartConfig.machines.value.length * this.baseHeight + this.padding;
+
+        // Get viewport height (minus some space for header, navigation, etc)
+        const viewportHeight = window.innerHeight - 150;
+
+        // Use the larger of the two values to ensure minimum height
+        this.chartHeight = Math.max(machineBasedHeight, viewportHeight);
 
         // Initialize week range
         const today = new Date();
@@ -148,7 +157,7 @@ export default {
     },
     toggleFilters() {
       this.triggerButtonAnimation('toggleFilters');
-      this.showFilters = !this.showFilters; // Toggle dropdown menu visibility
+      this.showFilters = !this.showFilters; 
     },
     setWeekRange(date: Date) {
       const startOfWeekDate = startOfWeek(date, { weekStartsOn: 1 }); // Week starts on Monday
@@ -219,7 +228,9 @@ export default {
         filteredMachines.filter((machine) => machine.startsWith(type))
       );
 
-      this.chartHeight = sortedFilteredMachines.length * this.baseHeight + this.padding;
+      const machineBasedHeight = sortedFilteredMachines.length * this.baseHeight + this.padding;
+      const viewportHeight = window.innerHeight - 150;
+      this.chartHeight = Math.max(machineBasedHeight, viewportHeight);
 
       const filterColors = [];
       for (let i = 0; i < filteredDatasets.length; i++) {
@@ -251,6 +262,12 @@ export default {
         },
       };
     },
+    handleResize() {
+      // Recalculate min height based on current viewport
+      const machineBasedHeight = (this.options.scales.y.labels?.length || 0) * this.baseHeight + this.padding;
+      const viewportHeight = window.innerHeight - 150;
+      this.chartHeight = Math.max(machineBasedHeight, viewportHeight);
+    },
     triggerButtonAnimation(buttonName: string) {
       this.isAnimating = buttonName; // Set the button being animated
     },
@@ -258,20 +275,12 @@ export default {
       this.isAnimating = null; // Reset the animation state
     },
     resetZoom() {
-      // Access the chart instance
       const chartComponent = this.$refs.ganttChart;
 
       if (chartComponent && chartComponent.chart) {
         chartComponent.chart.resetZoom();
       }
     },
-  },
-  mounted() {
-    console.log('GanttChart is mounted')
-    this.fetchData().then(() => {
-      this.originalData = JSON.parse(JSON.stringify(this.data));
-      this.originalOptions = this.options
-    });
   },
   watch: {
     selectedMachineTypes: {
@@ -291,6 +300,27 @@ export default {
 </script>
 
 <style scoped>
+.filters {
+  text-align: right;
+  margin: 5px 5px;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  position: relative;
+}
+
+.filter-menu {
+  position: absolute;
+  top: 50px;
+  right: 5px;
+  background: white;
+  box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  padding: 10px;
+  z-index: 1000;
+}
+
 button {
   background: none;
   cursor: pointer;

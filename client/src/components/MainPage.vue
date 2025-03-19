@@ -1,5 +1,5 @@
 <template>
-    <div class="main-view" :class="{ 'disabled-content': showBranchModal }">
+    <div class="main-view">
         <header class="header">
             <div ref="detectOutsideClick" class="left-section">
                 <button @click="toggleMenu" class="menu-btn">
@@ -16,8 +16,12 @@
             <!--<button @click="createNewPlan" class="create-plan-btn">Criar Novo Plano</button>-->
         </header>
 
-        <div class="gantt-container" v-if="showGanttChart">
+        <div v-if="showGanttChart" class="content-container">
             <GanttChart :isLoading="isAlgorithmRunning" :key="renderKey" />
+        </div>
+
+        <div v-if="showPlanHistory" class="content-container">
+            <PlanHistoryPage @close="closePlanHistoryPage" />
         </div>
 
         <!-- Other modals -->
@@ -37,7 +41,6 @@
             :noRoutings="missingItemsData[userID]?.noRoutings || []" :noBoms="missingItemsData[userID]?.noBoms || []"
             @close="closeMissingItemsModal" />
 
-        <PlanHistoryPage v-if="showPlanHistory" @close="closePlanHistoryPage" />
     </div>
 
     <!--<div v-if="showBranchModal" class="modal-overlay">
@@ -60,7 +63,6 @@ export default {
     data() {
         return {
             userID: null as any,
-            showBranchModal: true,
             showCriteriaModal: false,
             showRemoveMachinesModal: false,
             showRemoveBoMsModal: false,
@@ -81,7 +83,7 @@ export default {
             isAlgorithmRunning: false,
             renderKey: 0,
             menuOpen: false,
-            apiUrl: `${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`,
+            apiUrl: `http://${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`,
         };
     },
     mounted() {
@@ -89,12 +91,25 @@ export default {
         document.addEventListener('click', this.handleClickOutside);
         // Check for URL parameters
         this.checkUrlParameters();
+        
+        // Add resize listener to adjust content height
+        window.addEventListener('resize', this.updateContentHeight);
+        this.updateContentHeight();
     },
     beforeDestroy() {
         window.removeEventListener("beforeunload", this.handlePageUnload);
         document.removeEventListener('click', this.handleClickOutside);
+        window.removeEventListener('resize', this.updateContentHeight);
     },
     methods: {
+        updateContentHeight() {
+            // Calculate and set the minimum height of the content area
+            const windowHeight = window.innerHeight;
+            const headerHeight = document.querySelector('.header')?.clientHeight || 0;
+            const minContentHeight = windowHeight - headerHeight;
+            
+            document.documentElement.style.setProperty('--content-min-height', `${minContentHeight}px`);
+        },
         handleClickOutside(event) {
             if (!this.$refs.detectOutsideClick.contains(event.target)) {
                 this.menuOpen = false;
@@ -131,10 +146,12 @@ export default {
             this.showPlanHistory = true;
             this.menuOpen = false;
             this.showGanttChart = false;
+            this.$nextTick(() => this.updateContentHeight());
         },
         closePlanHistoryPage() {
             this.showPlanHistory = false;
             this.showGanttChart = true;
+            this.$nextTick(() => this.updateContentHeight());
         },
         async selectBranchWithParams(branch, userId) {
 
@@ -152,6 +169,7 @@ export default {
                     this.showBranchModal = false;
                     this.showGanttChart = true;
                     console.log(data.message);
+                    this.$nextTick(() => this.updateContentHeight());
                 } else {
                     alert(data.message);
                 }
@@ -527,17 +545,33 @@ export default {
 
 <style scoped>
 /* Main view layout */
+:root {
+    --content-min-height: 100vh;
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+}
+
 .main-view {
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    min-height: 100vh;
+}
+
+.content-container {
+    flex: 1;
+    min-height: var(--content-min-height);
+    display: flex;
+    flex-direction: column;
 }
 
 .header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    /* Keeps the button on the right */
     background-color: #4CAF50;
     color: white;
     padding: 10px 20px;
@@ -549,7 +583,6 @@ export default {
     margin: 0;
 }
 
-/* Grouping the menu button and title together */
 .left-section {
     position: relative;
     display: flex;
@@ -616,23 +649,6 @@ export default {
 
 .dropdown-menu li:hover {
     background-color: #f0f0f0;
-}
-
-/* Gantt chart container */
-.gantt-container {
-    flex: 1;
-    background-color: #f9f9f9;
-    border: 2px solid #ddd;
-    border-radius: 10px;
-    margin: 10px 20px;
-    box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.2);
-    overflow: auto;
-}
-
-/* All other interactions are disabled when the branch selection is open */
-.disabled-content {
-    pointer-events: none;
-    opacity: 0.5;
 }
 
 /* Modal overlay: remains fully interactive */
