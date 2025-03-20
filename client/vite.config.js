@@ -23,7 +23,7 @@ export default defineConfig(({ mode }) => {
       proxy: {
         // Proxy API requests to Flask backend
         '/api': {
-          target: `http://${env.VITE_FLASK_HOST || 'localhost'}:${env.VITE_FLASK_PORT || 5001}`,
+          target: `${env.VITE_FLASK_HOST || 'localhost'}:${env.VITE_FLASK_PORT || 5001}`,
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api/, '')
         }

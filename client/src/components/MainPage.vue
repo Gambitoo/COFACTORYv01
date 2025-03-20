@@ -83,7 +83,7 @@ export default {
             isAlgorithmRunning: false,
             renderKey: 0,
             menuOpen: false,
-            apiUrl: `http://${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`,
+            apiUrl: `${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`,
         };
     },
     mounted() {
