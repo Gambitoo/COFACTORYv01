@@ -320,7 +320,7 @@ def sync_plan_folders_with_db():
                         try:
                             shutil.rmtree(plan_folder_path)
                         except Exception as ex:
-                            print(f"Error deleting folder {plan_folder_path}: {e}")
+                            print(f"Error deleting folder {plan_folder_path}: {ex}")
             
             if "GR" in db_name:
                 ExecutionPlan.GR_instances = [ep for ep in ExecutionPlan.GR_instances if ep.PlanoId in plano_ids]
@@ -328,7 +328,7 @@ def sync_plan_folders_with_db():
                 ExecutionPlan.PT_instances = [ep for ep in ExecutionPlan.PT_instances if ep.PlanoId in plano_ids]
                         
         except pyodbc.Error as ex:
-            print(f"Error synchronizing plan folders for {db_name}: {e}")
+            print(f"Error synchronizing plan folders for {db_name}: {ex}")
             
     print("Plan folder synchronization completed.")
 
