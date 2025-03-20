@@ -65,22 +65,23 @@ class TimeUnit:
         shift_start_times = [time(0, 0), time(8, 0), time(16, 0)]  # Midnight, 8 AM, 4 PM
 
         def start_time():
-            with pyodbc.connect(data_handler.ConnectionString) as conn, conn.cursor() as cursor:
-                # Check if TimeUnits table has records for this machine
-                cursor.execute("SELECT TOP 1 id, CompletionTime FROM TimeUnits WHERE Machine = ? ORDER BY CompletionTime DESC", (self.Machine,))
-                result = cursor.fetchone()
-                TU_id, latest_ep_CoT = result if result else (None, None)
-
-                if TU_id:
-                    cursor.execute("SELECT ExecutionPlanId FROM TimeUnitExecutionPlans WHERE TimeUnitId = ?", (TU_id,))
-                    exec_plan_id = cursor.fetchone()[0]
-
-                    cursor.execute("SELECT Item FROM ExecutionPlans WHERE id = ?", (exec_plan_id,))
-                    previous_plan_item = cursor.fetchone()[0]
-
-                    previous_type = next((item.MaterialType for item in data_handler.Items if item.Name == previous_plan_item), None)
-                else:
-                    previous_type = None
+            with pyodbc.connect(data_handler.ConnectionString) as conn:
+                with conn.cursor() as cursor:  # Opens the cursor
+                    # Check if TimeUnits table has records for this machine
+                    cursor.execute("SELECT TOP 1 id, CompletionTime FROM TimeUnits WHERE Machine = ? ORDER BY CompletionTime DESC", (self.Machine,))
+                    result = cursor.fetchone()
+                    TU_id, latest_ep_CoT = result if result else (None, None)
+    
+                    if TU_id:
+                        cursor.execute("SELECT ExecutionPlanId FROM TimeUnitExecutionPlans WHERE TimeUnitId = ?", (TU_id,))
+                        exec_plan_id = cursor.fetchone()[0]
+    
+                        cursor.execute("SELECT Item FROM ExecutionPlans WHERE id = ?", (exec_plan_id,))
+                        previous_plan_item = cursor.fetchone()[0]
+    
+                        previous_type = next((item.MaterialType for item in data_handler.Items if item.Name == previous_plan_item), None)
+                    else:
+                        previous_type = None
 
             # Determine the initial start time
             start_time = max(latest_ep_CoT, current_time) if latest_ep_CoT else current_time
@@ -511,19 +512,16 @@ class DataHandler:
     def readDBData(connection_string, database):
         def fetch_data(queries):
             data = {}
-            connection = None
             try:
-                connection = pyodbc.connect(connection_string)
-                cursor = connection.cursor()
-                for query_key, query in queries.items():
-                    cursor.execute(query)
-                    rows = cursor.fetchall()
-                    data[query_key] = rows
-                cursor.close()
+                with pyodbc.connect(connection_string) as connection:
+                    with connection.cursor() as cursor:
+                        for query_key, query in queries.items():
+                            cursor.execute(query)
+                            rows = cursor.fetchall()
+                            data[query_key] = rows
             except pyodbc.Error as ex:
                 print(f'Error: {ex}')
-            finally:
-                connection.close()
+            
             return data
 
         def process_bom_data(rows, default):

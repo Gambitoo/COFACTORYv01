@@ -46,7 +46,7 @@
     </div>
 
     <!-- Gantt Chart -->
-    <div class="chart-container" @dblclick="resetZoom">
+    <div :style="{ height: chartHeight + 'px', overflowY: 'auto', position: 'relative' }" @dblclick="resetZoom">
       <Bar v-if="isDataLoaded" ref="ganttChart" :data="data" :options="options" />
       <p v-else class="loading-text">A carregar dados...</p>
     </div>
@@ -107,7 +107,6 @@ export default {
     // Get all the items and machines to populate the chart
     this.loadChartData();
     // Initial height calculation
-    this.updateChartHeight();
   },
   beforeDestroy() {
     window.removeEventListener('resize', this.handleResize);
@@ -149,14 +148,6 @@ export default {
 
       // Use the larger of the two values to ensure minimum height
       this.chartHeight = Math.max(machineBasedHeight, viewportHeight);
-
-      // Apply the height to the chart container
-      this.$nextTick(() => {
-        const chartContainer = this.$el.querySelector('.chart-container');
-        if (chartContainer) {
-          chartContainer.style.height = `${this.chartHeight}px`;
-        }
-      });
     },
     toggleFilters() {
       this.triggerButtonAnimation('toggleFilters');
@@ -202,23 +193,23 @@ export default {
     filterbyMachine() {
       if (!this.originalData || !this.originalOptions) return;
 
-      // Ensure selectedMachineTypes are sorted by the desired order
+      // Ensure machines are sorted by the defined order
       this.selectedMachineTypes = this.selectedMachineTypes.sort((a, b) => {
         const order = ['ROD', 'MDW', 'BUN'];
         return order.indexOf(a) - order.indexOf(b);
       });
 
-      // Filter datasets based on selected machine types
+      // Filter datasets based on selected processes
       const filteredDatasets = this.originalData.datasets[0].data.filter((dataset) =>
         this.selectedMachineTypes.some((filter) => dataset.y.startsWith(filter))
       );
 
-      // Filter y-axis labels based on selected machine types
+      // Filter machines based on selected processes
       const filteredMachines = this.originalOptions.scales.y.labels.filter((label) =>
         this.selectedMachineTypes.some((filter) => label.startsWith(filter))
       );
 
-      // Sort the filteredMachines based on the order of selectedMachineTypes
+      // Sort the machines 
       const sortedFilteredMachines = this.selectedMachineTypes.flatMap((type) =>
         filteredMachines.filter((machine) => machine.startsWith(type))
       );
@@ -227,12 +218,6 @@ export default {
       const machineBasedHeight = sortedFilteredMachines.length * this.baseHeight + this.padding;
       const viewportHeight = window.innerHeight - 250;
       this.chartHeight = Math.max(machineBasedHeight, viewportHeight);
-      this.$nextTick(() => {
-        const chartContainer = this.$el.querySelector('.chart-container');
-        if (chartContainer) {
-          chartContainer.style.height = `${this.chartHeight}px`;
-        }
-      });
 
       // Get the right colors for the filtered datasets
       const filterColors = [];
@@ -331,15 +316,6 @@ export default {
   border-radius: 5px;
   padding: 10px;
   z-index: 1000;
-}
-
-.chart-container {
-  position: relative;
-  overflow-y: auto;
-  min-height: 400px;
-  /* Fallback minimum height */
-  border-radius: 5px;
-  background-color: #fcfcfc;
 }
 
 .loading-text {

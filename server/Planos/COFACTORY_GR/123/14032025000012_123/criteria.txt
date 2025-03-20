@@ -1,6 +1,0 @@
-Remover Máquinas: ['BMC002', 'BMC001'],
-Organizar por Melhor Cycle Time, 
-Sequenciamento por Diâmetro, 
-Consumir Stock disponível, 
-Menor Número de Mudanças, 
-Desativar BoMs: {'B0037X02840S050CU': [['D07X02840CU', 'D10X02840CU', 'D10X02840CU', 'D10X02840CU']], 'B0037X02840S051CU': [['D07X02840CU', 'D10X02840CU', 'D10X02840CU', 'D10X02840CU']]}

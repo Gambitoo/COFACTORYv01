@@ -2,7 +2,9 @@ from flask import Flask, jsonify, request, session, send_file, send_from_directo
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
 import os
+import shutil
 import pandas as pd
+import pyodbc
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 import threading
@@ -21,8 +23,10 @@ load_dotenv('.env')
 
 INPUT_FOLDER = os.environ.get('STORAGE_PATH')
 ALLOWED_EXTENSIONS = {'xlsx'}
-CLEANUP_INTERVAL = 30  # Run the temp cleanup every 30 minutes
+TEMP_CLEANUP_INTERVAL = 30  # Run the temp cleanup every 30 minutes
 TEMP_FILES_LIFETIME = 3600  # Delete temp files older than 1 hour (3600 seconds)
+
+TEMP_PLAN_SYNC = 6 # Run the plan folder sync with the DB data every 6 hours
 
 # All existing criteria and specific user data
 all_criteria, user_data = None, {}
@@ -265,7 +269,7 @@ def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def cleanup_temp_folder():
-    """Delete temp files older than FILE_LIFETIME seconds."""
+    """Delete useless temp files from the temp folder of each user."""
     now = time.time()
     
     for _, user_info in user_data.items():
@@ -277,6 +281,56 @@ def cleanup_temp_folder():
                     if file_age > TEMP_FILES_LIFETIME:
                         os.remove(file_path)
                         print(f"Deleted old temp file: {file_path}")
+                        
+def sync_plan_folders_with_db():
+    """Sync plan folders with database records.
+    Delete folders that don't have corresponding execution plans in the database."""
+    
+    # Check for both databases
+    for db_name, connection_string in connection_strings.items():
+        try:
+            # Get all plan ids from the database
+            conn = pyodbc.connect(connection_string)
+            cursor = conn.cursor()
+            cursor.execute("SELECT DISTINCT PlanoId FROM ExecutionPlans WHERE PlanoId IS NOT NULL")
+            plano_ids = set(row[0] for row in cursor.fetchall())
+            cursor.close()
+            conn.close()
+            
+            # Get all plan folders for this database
+            branch_folder = os.path.join(INPUT_FOLDER, db_name)
+            if not os.path.exists(branch_folder):
+                continue
+            
+            user_folders = [
+                folder for folder in os.listdir(branch_folder)
+                if os.path.isdir(os.path.join(branch_folder, folder))]
+                
+            for user_folder in user_folders:
+                user_folder_path = os.path.join(branch_folder, user_folder) 
+                    
+                plan_folders = [
+                    folder for folder in os.listdir(user_folder_path)
+                    if os.path.isdir(os.path.join(user_folder_path, folder)) and folder != "temp"
+                ]
+                
+                for plan_folder in plan_folders:
+                    if plan_folder not in plano_ids:
+                        plan_folder_path = os.path.join(user_folder_path, plan_folder)
+                        try:
+                            shutil.rmtree(plan_folder_path)
+                        except Exception as ex:
+                            print(f"Error deleting folder {plan_folder_path}: {e}")
+            
+            if "GR" in db_name:
+                ExecutionPlan.GR_instances = [ep for ep in ExecutionPlan.GR_instances if ep.PlanoId in plano_ids]
+            if "PT" in db_name:
+                ExecutionPlan.PT_instances = [ep for ep in ExecutionPlan.PT_instances if ep.PlanoId in plano_ids]
+                        
+        except pyodbc.Error as ex:
+            print(f"Error synchronizing plan folders for {db_name}: {e}")
+            
+    print("Plan folder synchronization completed.")
 
 def validate_file(file_path):
     # Expected column types for the input file
@@ -771,8 +825,8 @@ def plan_history():
     # Remove folders after completing all processing
     for folder_path in folders_to_remove:
         try:
-            os.remove(folder_path)
-            print(f"Removed folder: {folder_path}")
+            shutil.rmtree(folder_path) 
+            print(f"Removed orphaned plan folder: {folder_path}")
         except Exception as e:
             print(f"Error removing folder {folder_path}: {e}")
             
@@ -791,7 +845,12 @@ def download_file(folder_name, filename):
 if __name__ == '__main__':
     # Start the temp cleanup scheduler before running the app
     scheduler = BackgroundScheduler()
-    scheduler.add_job(cleanup_temp_folder, 'interval', minutes=CLEANUP_INTERVAL)
+    
+    # Add temp folder cleanup job
+    scheduler.add_job(cleanup_temp_folder, 'interval', minutes=TEMP_CLEANUP_INTERVAL)
+    
+    # Add plan folder and DB sync job
+    scheduler.add_job(sync_plan_folders_with_db, 'interval', hours=TEMP_PLAN_SYNC)
     scheduler.start()
     
     try:

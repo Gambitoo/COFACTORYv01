@@ -91,29 +91,43 @@ export const options = reactive({
   },
 });
 
-// Create a better color generation function
 const generateDistinctColor = (index) => {
   // Use golden ratio for better distribution
   const goldenRatioConjugate = 0.618033988749895;
 
   // Start with a random hue and use golden ratio to get distinct colors
   let hue = (index * goldenRatioConjugate) % 1;
+  hue = Math.floor(hue * 360);
+  
+  // Set minimum saturation and constrained lightness range
+  // These ranges ensure colors are never too dark (black) or too light (white)
+  let saturation = 70 + (index % 4) * 7; // Range: 70-91%
+  let lightness = 50 + (index % 5) * 5;  // Range: 50-70%
+  
+  // Force additional constraints to be absolutely sure
+  if (lightness < 40) lightness = 40; // Ensure never too dark
+  if (lightness > 75) lightness = 75; // Ensure never too light
+  if (saturation < 50) saturation = 50; // Ensure enough color saturation
 
-  // Vary saturation and lightness slightly based on index for even more distinction
-  const saturation = 65 + (index % 3) * 8; // Vary between 65-85%
-  const lightness = 55 + (index % 5) * 2;  // Vary between 55-70%
-
-  return `hsl(${Math.floor(hue * 360)}, ${saturation}%, ${lightness}%)`;
+  return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
 };
 
-// Function to generate border color
 const generateBorderColor = (color) => {
-  const hslMatch = color.match(/hsl\((\d+),\s*(\d+)%,\s*(\d+)%\)/);
+  if (!color || typeof color !== 'string') {
+    return '#666666';
+  }
+  
+  // Updated regex to properly match the HSL pattern with or without commas
+  const hslMatch = color.match(/hsl\((\d+),?\s*(\d+)%,?\s*(\d+)%\)/);
   if (hslMatch) {
     const [_, h, s, l] = hslMatch;
-    // Darker border 
-    return `hsl(${h}, ${s}%, ${Math.max(30, Number(l) - 15)}%)`;
+    
+    // Ensure darker border but not too dark
+    const newLightness = Math.max(30, Math.min(Number(l) - 15, 60));
+    
+    return `hsl(${h}, ${s}%, ${newLightness}%)`;
   }
+  
   return color;
 };
 
@@ -192,7 +206,7 @@ export const getData = async () => {
       };
       dt.data.push(data);
 
-      const color = colorMap.get(plan.itemRelated);
+      const color = colorMap.get(plan.itemRelated) || generateDistinctColor(dt.data.length);
       dt.backgroundColor.push(color);
       dt.borderColor.push(generateBorderColor(color));
     });

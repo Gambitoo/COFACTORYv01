@@ -100,9 +100,9 @@ export default {
       data: chartConfig.data,
       options: chartConfig.options,
       isDataLoaded: false, // Track loading state
-      chartHeight: null as any,
-      baseHeight: null as any,
-      padding: null as any,
+      chartHeight: 0,
+      baseHeight: 40, // Height per machine
+      padding: 100,
       currentWeekRange: {
         start: null as Date | null,
         end: null as Date | null,
@@ -136,17 +136,8 @@ export default {
         await chartConfig.getData();
         this.isDataLoaded = true;
 
-        // Dynamically adjust chart height
-        this.baseHeight = 40; // Height per machine
-        this.padding = 100;
-        // Calculate height based on machines
-        const machineBasedHeight = chartConfig.machines.value.length * this.baseHeight + this.padding;
-
-        // Get viewport height (minus some space for header, navigation, etc)
-        const viewportHeight = window.innerHeight - 150;
-
-        // Use the larger of the two values to ensure minimum height
-        this.chartHeight = Math.max(machineBasedHeight, viewportHeight);
+        // Update chart height based on data
+        this.updateChartHeight();
 
         // Initialize week range
         const today = new Date();
@@ -154,6 +145,17 @@ export default {
       } catch (error) {
         console.error('Error loading Gantt chart data:', error);
       }
+    },
+    updateChartHeight() {
+      // Calculate height based on number of machines or a minimum to fill the screen
+      const machineCount = this.options?.scales?.y?.labels?.length || 0;
+      const machineBasedHeight = machineCount * this.baseHeight + this.padding;
+
+      // Get viewport height (minus space for header, navigation, etc)
+      const viewportHeight = window.innerHeight - 250; // Adjusted to leave some space for other UI elements
+
+      // Use the larger of the two values to ensure minimum height
+      this.chartHeight = Math.max(machineBasedHeight, viewportHeight);
     },
     toggleFilters() {
       this.triggerButtonAnimation('toggleFilters');
@@ -207,27 +209,28 @@ export default {
       this.setWeekRange(startDate);
     },
     filterbyMachine() {
-      // Ensure selectedMachineTypes are sorted by the desired order
+      // Ensure machines are sorted by the defined order
       this.selectedMachineTypes = this.selectedMachineTypes.sort((a, b) => {
         const order = ['ROD', 'MDW', 'BUN'];
         return order.indexOf(a) - order.indexOf(b);
       });
 
-      // Filter datasets based on selected machine types
+      // Filter datasets based on selected processes
       const filteredDatasets = this.originalData.datasets[0].data.filter((dataset) =>
         this.selectedMachineTypes.some((filter) => dataset.y.startsWith(filter))
       );
 
-      // Filter y-axis labels based on selected machine types
+      // Filter machines based on selected processes
       const filteredMachines = this.originalOptions.scales.y.labels.filter((label) =>
         this.selectedMachineTypes.some((filter) => label.startsWith(filter))
       );
 
-      // Sort the filteredMachines based on the order of selectedMachineTypes
+      // Sort the machines 
       const sortedFilteredMachines = this.selectedMachineTypes.flatMap((type) =>
         filteredMachines.filter((machine) => machine.startsWith(type))
       );
 
+      // Update chart height based on visible machines
       const machineBasedHeight = sortedFilteredMachines.length * this.baseHeight + this.padding;
       const viewportHeight = window.innerHeight - 150;
       this.chartHeight = Math.max(machineBasedHeight, viewportHeight);
@@ -263,10 +266,7 @@ export default {
       };
     },
     handleResize() {
-      // Recalculate min height based on current viewport
-      const machineBasedHeight = (this.options.scales.y.labels?.length || 0) * this.baseHeight + this.padding;
-      const viewportHeight = window.innerHeight - 150;
-      this.chartHeight = Math.max(machineBasedHeight, viewportHeight);
+      this.updateChartHeight();
     },
     triggerButtonAnimation(buttonName: string) {
       this.isAnimating = buttonName; // Set the button being animated
