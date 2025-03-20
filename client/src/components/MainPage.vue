@@ -6,7 +6,7 @@
                     <font-awesome-icon icon="fa-solid fa-bars" />
                 </button>
                 <h1>COFACTORY</h1>
-                <div  v-if="menuOpen" class="dropdown-menu">
+                <div v-if="menuOpen" class="dropdown-menu">
                     <ul>
                         <li @click="createNewPlan">Criar Novo Plano</li>
                         <li @click="openPlanHistoryPage">Histórico de Planos</li>
@@ -89,9 +89,8 @@ export default {
     mounted() {
         window.addEventListener("beforeunload", this.handlePageUnload);
         document.addEventListener('click', this.handleClickOutside);
-        // Check for URL parameters
         this.checkUrlParameters();
-        
+
         // Add resize listener to adjust content height
         window.addEventListener('resize', this.updateContentHeight);
         this.updateContentHeight();
@@ -107,15 +106,15 @@ export default {
             const windowHeight = window.innerHeight;
             const headerHeight = document.querySelector('.header')?.clientHeight || 0;
             const minContentHeight = windowHeight - headerHeight;
-            
+
             document.documentElement.style.setProperty('--content-min-height', `${minContentHeight}px`);
         },
         handleClickOutside(event) {
-            if (!this.$refs.detectOutsideClick.contains(event.target)) {
+            if (this.$refs.detectOutsideClick && !this.$refs.detectOutsideClick.contains(event.target)) {
                 this.menuOpen = false;
             }
         },
-        // New method to check URL parameters
+        // Check and get URL parameters
         checkUrlParameters() {
             // Get URL search parameters
             const urlParams = new URLSearchParams(window.location.search);
@@ -154,7 +153,6 @@ export default {
             this.$nextTick(() => this.updateContentHeight());
         },
         async selectBranchWithParams(branch, userId) {
-
             try {
                 const response = await fetch(`${this.apiUrl}/selectBranch?user_id=${this.userID}`, {
                     method: 'POST',
@@ -241,7 +239,7 @@ export default {
 
             } catch (error) {
                 console.error("Error:", error);
-                alert("Ocorreu um erro. Por favor tente outra vez.");
+                alert("Ocorreu um erro. Por favor tente novamente.");
             }
         },
         async handleModalConfirm(selectedCriteria) {
@@ -258,7 +256,7 @@ export default {
             })
                 .then((response) => response.json())
                 .catch(() => {
-                    alert("Erro no processamento dos critérios. Por favor tente outra vez.");
+                    alert("Erro no processamento dos critérios. Por favor tente novamente.");
                 });
 
             this.showCriteriaModal = false;
@@ -291,10 +289,10 @@ export default {
                     this.availableMachines = data.machines.map(machine => machine.name);
                     this.processes = data.processes;
                 } else {
-                    alert("Erro ao solicitação das máquinas. Por favor tente outra vez.");
+                    alert("Erro ao solicitação das máquinas. Por favor tente novamente.");
                 }
             } catch (error) {
-                alert("Erro na solicitação das máquinas. Por favor tente outra vez.");
+                alert("Erro na solicitação das máquinas. Por favor tente novamente.");
             }
         },
         async fetchBoMs() {
@@ -307,10 +305,10 @@ export default {
                 if (response.ok) {
                     this.inputBoMs = data.item_BoMs;
                 } else {
-                    alert("Erro na solicitação das BOM's. Por favor tente outra vez.");
+                    alert("Erro na solicitação das BOM's. Por favor tente novamente.");
                 }
             } catch (error) {
-                alert("Erro na solicitação das BOM's. Por favor tente outra vez.");
+                alert("Erro na solicitação das BOM's. Por favor tente novamente.");
             }
         },
         handleRemoveMachinesConfirm(selectedMachines) {
@@ -478,17 +476,24 @@ export default {
                     if (!response.ok) {
                         throw new Error("Falha no download dos ficheiros.");
                     }
-                    return response.blob();  // Convert response to blob
+                    return response.blob();
                 })
                 .then(blob => {
-                    const url = window.URL.createObjectURL(blob);
+                    const URL = window.URL.createObjectURL(blob);
+
+                    // Create and configure the anchor element
                     const a = document.createElement('a');
-                    a.href = url;
+                    a.style.display = 'none';
+                    a.href = URL;
                     a.download = 'OUTPUT_Plans.zip'; // File name
+
+                    // Append, click, and cleanup
                     document.body.appendChild(a);
                     a.click();
-                    document.body.removeChild(a);
-                    window.URL.revokeObjectURL(url);
+                    setTimeout(() => {
+                        document.body.removeChild(a);
+                        window.URL.revokeObjectURL(URL);
+                    }, 100);
                 })
                 .then((data) => {
                     console.log("Resultados guardados com sucesso:", data);
@@ -496,7 +501,7 @@ export default {
                 })
                 .catch((error) => {
                     console.error("Erro no armazenamento dos resultados:", error);
-                    alert("Erro no armazenamento do plano gerado. Por favor tente outra vez.")
+                    alert("Erro ao guardar o plano gerado. Por favor tente novamente.")
                 });
         },
         closeResultsModal() {
@@ -549,7 +554,8 @@ export default {
     --content-min-height: 100vh;
 }
 
-html, body {
+html,
+body {
     margin: 0;
     padding: 0;
     height: 100%;

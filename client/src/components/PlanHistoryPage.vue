@@ -59,7 +59,8 @@
             </td>
           </tr>
           <!-- Spacer rows to fill empty space -->
-          <tr v-if="paginatedPlans.length < 5" v-for="i in (5 - paginatedPlans.length)" :key="`empty-${i}`" class="empty-row">
+          <tr v-if="paginatedPlans.length < 5" v-for="i in (5 - paginatedPlans.length)" :key="`empty-${i}`"
+            class="empty-row">
             <td colspan="7">&nbsp;</td>
           </tr>
         </tbody>
@@ -188,7 +189,7 @@ export default {
 
         // Calculate the available height for the table wrapper
         const availableHeight = windowHeight - headerHeight - controlsHeight - padding;
-        
+
         // Set the min-height for the table wrapper
         const tableWrapper = planHistoryElement.querySelector('.table-wrapper');
         if (tableWrapper) {
@@ -199,7 +200,7 @@ export default {
     async fetchPlanHistory() {
       try {
         const response = await fetch(`${this.apiUrl}/getPlanHistory`, {
-          method: "POST",
+          method: "GET",
           credentials: "include",
         });
         if (response.ok) {
@@ -234,12 +235,40 @@ export default {
       return `${day}${month}${year}${hours}${minutes}${seconds}`;
     },
     downloadFile(url: string) {
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = url.split("/").pop() || "file";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      fetch(url, {
+        method: 'GET',
+        credentials: 'include'
+      })
+        .then(response => {
+          if (!response.ok) {
+            throw new Error("Falha no download dos ficheiros.");
+          }
+          return response.blob();
+        })
+        .then(blob => {
+          const URL = window.URL.createObjectURL(blob);
+
+          // Get the filename from the URL
+          const filename = url.split("/").pop() || "file";
+
+          // Create and configure the anchor element
+          const a = document.createElement('a');
+          a.style.display = 'none';
+          a.href = URL;
+          a.download = filename;
+
+          // Append, click, and cleanup
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => {
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(URL);
+          }, 100);
+        })
+        .catch(error => {
+          console.error("Erro de download:", error);
+          alert("Erro ao descarregar o ficheiro. Por favor tente novamente.");
+        });
     },
     sortBy(column: string) {
       this.currentSortOrder[column] = this.currentSortOrder[column] === 'asc' ? 'desc' : 'asc';
@@ -444,7 +473,7 @@ export default {
   margin-bottom: 20px;
   display: flex;
   flex-direction: column;
-  min-height: 400px; 
+  min-height: 400px;
   border-radius: 5px;
 }
 

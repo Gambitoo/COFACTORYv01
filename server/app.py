@@ -40,6 +40,7 @@ app.config.update(
     HOST=os.environ.get('HOST', '0.0.0.0'),
     PORT=os.environ.get('PORT', '5001'),
     URL=os.environ.get('URL', 'http://localhost'),
+    DRIVER=os.environ.get('DRIVER', '{ODBC Driver 17 for SQL Server}')
 )
 
 # Create thread pool and tracking dictionaries
@@ -48,12 +49,12 @@ running_algorithms = {}
 
 # Load data from both databases
 connection_strings = {
-    "COFACTORY_PT": f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={os.environ.get("COFPT_DATABASE_SERVER")};'
+    "COFACTORY_PT": f'DRIVER={app.config["DRIVER"]};SERVER={os.environ.get("COFPT_DATABASE_SERVER")};'
                     f'DATABASE={os.environ.get("COFPT_DATABASE_NAME")};UID={os.environ.get("COFPT_DATABASE_USERNAME")};'
                     f'PWD={os.environ.get("COFPT_DATABASE_PASSWORD")};'
                     f'TrustServerCertificate=yes;',
     
-    "COFACTORY_GR": f'DRIVER={{ODBC Driver 17 for SQL Server}};SERVER={os.environ.get("COFGR_DATABASE_SERVER")};'
+    "COFACTORY_GR": f'DRIVER={app.config["DRIVER"]};SERVER={os.environ.get("COFGR_DATABASE_SERVER")};'
                     f'DATABASE={os.environ.get("COFGR_DATABASE_NAME")};UID={os.environ.get("COFGR_DATABASE_USERNAME")};'
                     f'PWD={os.environ.get("COFGR_DATABASE_PASSWORD")};'
                     f'TrustServerCertificate=yes;'
@@ -199,7 +200,7 @@ async def select_branch():
 
     # Save the user ID in the session
     session['user_id'] = user_id
-
+    
     # Update the input and temp folder paths for the specific user (session)
     branch_folder = os.path.join(INPUT_FOLDER, selected_branch)
     upload_folder = os.path.join(branch_folder, user_id)
@@ -725,7 +726,6 @@ def save_results():
         ExecutionPlan.PT_instances.extend(dataHandler.ExecutionPlans)
         TimeUnit.PT_instances.extend(dataHandler.TimeUnits)
         
-    #return jsonify({"message": "Resultados guardados com sucesso."}), 200
     return send_file(zip_buffer, as_attachment=True, download_name='OUTPUT_Plans.zip', mimetype='application/zip')
 
 def get_ep_by_plano_id(database, plano_id):
@@ -741,7 +741,7 @@ def get_ep_by_plano_id(database, plano_id):
 
     return [min_ST, max_CoT]
 
-@app.route('/getPlanHistory', methods=['POST'])
+@app.route('/getPlanHistory', methods=['GET'])
 def plan_history():
     user_id = session.get('user_id', None)
     dataHandler = user_data[user_id]['input_data']
@@ -778,18 +778,17 @@ def plan_history():
             input_files = []
             output_files = []
             criteria_contents = []
-            PORT = app.config["PORT"]
             URL = app.config["URL"]
             
             # Add the zipped file with the plans data to output files
             zip_file_path = os.path.join(plan_folder_path, "OUTPUT_Plans.zip")
             if os.path.exists(zip_file_path):
-                output_files.append(f"{URL}:{PORT}/download/{path_folder}/OUTPUT_Plans.zip")
+                output_files.append(f"{URL}/download/{path_folder}/OUTPUT_Plans.zip")
     
             for file in os.listdir(plan_folder_path):
                 file_path = os.path.join(plan_folder_path, file)
                 if os.path.isfile(file_path):
-                    file_url = f"{URL}:{PORT}/download/{path_folder}/{file}"
+                    file_url = f"{URL}/download/{path_folder}/{file}"
                     
                     # Categorize files
                     if file.startswith("Plano"): # Input file used to create the plan
