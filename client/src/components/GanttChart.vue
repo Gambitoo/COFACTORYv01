@@ -15,10 +15,10 @@
         @animationend="resetAnimation" aria-label="Filters">
         <font-awesome-icon icon="filter" />
       </button>
-      <div v-if="isAlgorithmRunning" class="loading-tooltip">
+      <!---<div v-if="isAlgorithmRunning" class="loading-tooltip">
         <div class="loading-spinner"></div>
         <p style="margin: 0;">A criar novo plano...</p>
-      </div>
+      </div>-->
 
       <!-- Filters Dropdown Menu -->
       <transition name="fade">

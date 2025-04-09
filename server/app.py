@@ -192,7 +192,7 @@ async def select_branch():
     data = request.json
     selected_branch = data.get('branch')
     user_id = data.get('userId')
-    
+
     global user_data
     
     if not user_id:
@@ -207,7 +207,7 @@ async def select_branch():
     temp_folder = os.path.join(upload_folder, 'temp')
     
     # Store paths in session for request context
-    session['upload_folder'] = upload_folder
+    session['branch_folder'] = branch_folder
     session['temp_folder'] = temp_folder
 
     # Create the folders
@@ -527,12 +527,13 @@ def run_algorithm_in_thread(user_id, dataHandler, PT_Settings):
         abort_event.clear()
         
         # Run the algorithm
-        success = executePandS(dataHandler, PT_Settings)
+        status, late_orders = executePandS(dataHandler, PT_Settings)
         
         # Update the algorithm status
         running_algorithms[user_id]["status"] = "completed"
-        running_algorithms[user_id]["success"] = success
-        running_algorithms[user_id]["message"] = "Algoritmo executado com sucesso." if success else "A execução do algoritmo foi abortada."
+        running_algorithms[user_id]["success"] = status
+        running_algorithms[user_id]["message"] = "Algoritmo executado com sucesso." if status else "A execução do algoritmo foi abortada."
+        running_algorithms[user_id]["late_orders"] = late_orders
     except Exception as e:
         import traceback
         # Update status with error information
@@ -579,7 +580,8 @@ def run_algorithm():
         "status": "running",
         "success": None,
         "message": "Algoritmo em execução.",
-        "start_time": time.time()
+        "start_time": time.time(),
+        "late_orders": []
     }
     
     # Submit the algorithm to the thread pool
@@ -587,8 +589,7 @@ def run_algorithm():
     
     return jsonify({
         'status': 'success',
-        'message': 'Iniciada a execução do algoritmo.',
-        'task_id': running_algorithms[user_id]["id"]
+        'message': 'Iniciada a execução do algoritmo.'
     }), 202 
 
 @app.route('/algorithmStatus', methods=['GET'])
@@ -621,8 +622,11 @@ def algorithm_status():
                 print(f"Removed finished algorithm for user {user_id}")
         
         threading.Thread(target=delayed_removal).start()
-    
-    return jsonify(status)
+
+    return jsonify({
+        'status': status["status"],
+        'late_orders': running_algorithms[user_id]["late_orders"]
+    }), 202 
 
 @app.route('/abortAlgorithm', methods=['POST'])
 def abort_algorithm():
@@ -654,10 +658,13 @@ def save_results():
     
     plano_id = f"{formatted_ST}_{user_id}"
     
+    # Get the user's upload folder
+    upload_folder = os.path.join(session['branch_folder'], user_id)
+    
     # Move file from temporary storage to permanent location
     input_file = session.get('input_file', None)  
     if input_file and os.path.exists(input_file):
-        plan_folder = os.path.join(session['upload_folder'], plano_id)
+        plan_folder = os.path.join(upload_folder, plano_id)
         os.makedirs(plan_folder, exist_ok=True)
         final_path = os.path.join(plan_folder, f"Plano_{formatted_ST}.xlsx")
         os.rename(input_file, final_path)
@@ -833,8 +840,13 @@ def plan_history():
 
 @app.route('/download/<folder_name>/<filename>', methods=['GET'])
 def download_file(folder_name, filename):
-    """Serves files from the user's plan history folder."""
-    plan_folder = os.path.join(session['upload_folder'], folder_name)
+    """Serves files from the user's plan history folder."""    
+    # Get the user's upload folder
+    user_id = folder_name.split('_', 1)[1]
+    
+    upload_folder = os.path.join(session['branch_folder'], user_id)
+    
+    plan_folder = os.path.join(upload_folder, folder_name)
     
     if not os.path.exists(os.path.join(plan_folder, filename)):
         return jsonify({"message": "Ficheiro não encontrado."}), 404

@@ -1,1 +1,0 @@
-Organizar por Melhor Cycle Time, Sequenciamento por Diâmetro, Consumir Stock disponível, Menor Número de Mudanças

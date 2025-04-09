@@ -8,19 +8,13 @@
         <span class="warning-symbol">⚠️</span>
       </div>
 
-      <!-- Items without Routing -->
-      <div v-if="noRoutings && noRoutings.length > 0">
-        <h3>Itens sem Routing</h3>
-        <ul>
-          <li v-for="item in noRoutings" :key="item">{{ item }}</li>
-        </ul>
-      </div>
-
-      <!-- Items without BoM's -->
-      <div v-if="noBoms && noBoms.length > 0">
-        <h3>Itens sem BOM</h3>
-        <ul>
-          <li v-for="item in noBoms" :key="item">{{ item }}</li>
+      <!-- Late Items -->
+      <div v-if="lateOrders && lateOrders.length > 0" class="late-orders-section">
+        <h3>Produtos Atrasados</h3>
+        <ul class="late-orders-list">
+          <li v-for="item in lateOrders" :key="item" class="late-order-item">
+            <span class="late-order-name">{{ item }}</span>
+          </li>
         </ul>
       </div>
 
@@ -34,8 +28,7 @@
 <script lang="ts">
 export default {
   props: {
-    noRoutings: Array,
-    noBoms: Array,
+    lateOrders: Array,
   },
   methods: {
     close() {
@@ -91,8 +84,8 @@ export default {
 }
 
 h3 {
-  font-size: 1.2rem;
-  margin-top: 15px;
+  font-size: 1.3rem;
+  margin-bottom: 15px;
   color: #2c3e50;
   font-weight: bold;
 }
@@ -106,16 +99,14 @@ h3 {
 .modal-content li {
   padding: 8px;
   background-color: #f9f9f9;
-  border: 1px solid #ddd;
-  margin-bottom: 5px;
-  border-radius: 5px;
-  color: #333;
+  border-bottom: 2px solid #eee;
+  margin-bottom: 3px;
 }
 
 .modal-actions {
   display: flex;
   justify-content: flex-end;
-  margin-top: 20px;
+  margin-top: 15px;
 }
 
 .modal-actions button {
@@ -131,5 +122,37 @@ h3 {
 
 .modal-actions button:hover {
   background-color: #45a049;
+}
+
+.late-orders-section {
+  margin-bottom: 15px;
+}
+
+.late-orders-list {
+  list-style-type: none;
+  padding: 0;
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+
+.late-order-item {
+  padding: 10px 15px;
+  display: flex;
+  align-items: center;
+}
+
+.late-order-item:last-child {
+  border-bottom: none;
+}
+
+.late-order-item:hover {
+  background-color: #f9f9f9;
+}
+
+.late-order-name {
+  font-size: 15px;
+  color: #333;
 }
 </style>

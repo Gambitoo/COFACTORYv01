@@ -223,16 +223,27 @@ export default {
       }
     },
     formatDate(timestamp: number | string) {
-      // Format for display
-      return timestamp ? new Date(timestamp).toLocaleString("pt-PT") : "N/A";
+      if (!timestamp) return "N/A";
+
+      // Convert timestamp to date 
+      const date = new Date(timestamp);
+
+      // Format to use the original timezone
+      const options = {
+        timeZone: 'UTC', 
+        hour12: false
+      };
+
+      return date.toLocaleString("pt-PT", options);
     },
     formatDateForId(timestamp) {
       const [datePart, timePart] = timestamp.split(', ');
       const [day, month, year] = datePart.split('/');
+      const newDay = parseInt(day).toString();
       const [hours, minutes, seconds] = timePart.split(':');
 
       // Return the formatted string directly
-      return `${day}${month}${year}${hours}${minutes}${seconds}`;
+      return `${newDay}${month}${year}${hours}${minutes}${seconds}`;
     },
     downloadFile(url: string) {
       fetch(url, {

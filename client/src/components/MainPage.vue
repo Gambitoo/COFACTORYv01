@@ -16,6 +16,11 @@
             <!--<button @click="createNewPlan" class="create-plan-btn">Criar Novo Plano</button>-->
         </header>
 
+        <div v-if="isAlgorithmRunning" class="loading-tooltip">
+            <div class="loading-spinner"></div>
+            <p style="margin: 0;">A criar novo plano...</p>
+        </div>
+
         <div v-if="showGanttChart" class="content-container">
             <GanttChart :isLoading="isAlgorithmRunning" :key="renderKey" />
         </div>
@@ -28,11 +33,12 @@
         <CriteriaModal v-if="showCriteriaModal" :title="modalTitle" :criteria="criteria" @confirm="handleModalConfirm"
             @close="closeCriteriaModal" />
 
-        <RemoveMachinesModal v-if="showRemoveMachinesModal" :machines="availableMachines" :processes="processes"
-            @confirm="handleRemoveMachinesConfirm" @close="closeRemoveMachinesModal" />
+        <RemoveMachinesModal v-if="showRemoveMachinesModal" :machines="branchMachines[currentBranch]?.machines || []"
+            :processes="branchMachines[currentBranch]?.processes || []" @confirm="handleRemoveMachinesConfirm"
+            @close="closeRemoveMachinesModal" />
 
-        <RemoveBoMsModal v-if="showRemoveBoMsModal" :BoMs="inputBoMs" @confirm="handleRemoveBoMsConfirm"
-            @close="closeRemoveBoMsModal" />
+        <RemoveBoMsModal v-if="showRemoveBoMsModal" :BoMs="branchBoMs[currentBranch] || null"
+            @confirm="handleRemoveBoMsConfirm" @close="closeRemoveBoMsModal" />
 
         <ResultsModal v-if="showResultsModal" @confirm="handleResultsConfirm" @cancel="closeResultsModal"
             @rerun="rerunPlan" />
@@ -40,6 +46,9 @@
         <MissingItemsModal v-if="missingItemsData[userID]?.shouldShow"
             :noRoutings="missingItemsData[userID]?.noRoutings || []" :noBoms="missingItemsData[userID]?.noBoms || []"
             @close="closeMissingItemsModal" />
+
+        <LateOrdersModal v-if="lateOrders[userID]?.shouldShow" :lateOrders="lateOrders[userID]?.orders || []"
+            @close="closeLateOrdersModal" />
 
     </div>
 
@@ -57,28 +66,30 @@ import ResultsModal from "@/components/ResultsModal.vue";
 import MissingItemsModal from "@/components/MissingItemsModal.vue";
 //import BranchSelectionModal from "@/components/BranchSelectionModal.vue";
 import PlanHistoryPage from "@/components/PlanHistoryPage.vue";
+import LateOrdersModal from "@/components/LateOrdersModal.vue";
 
 export default {
-    components: { GanttChart, CriteriaModal, RemoveMachinesModal, RemoveBoMsModal, ResultsModal, MissingItemsModal, PlanHistoryPage },
+    components: { GanttChart, CriteriaModal, RemoveMachinesModal, RemoveBoMsModal, ResultsModal, MissingItemsModal, LateOrdersModal, PlanHistoryPage },
     data() {
         return {
             userID: null as any,
             showCriteriaModal: false,
             showRemoveMachinesModal: false,
             showRemoveBoMsModal: false,
-            showResultsModal: false,
             showGanttChart: false,
+            showResultsModal: false,
             showPlanHistory: false,
             modalTitle: "",
             criteria: ["Remover Máquinas", "Organizar por Melhor Cycle Time", "Sequenciamento por Diâmetro", "Consumir Stock disponível", "Menor Número de Mudanças", "Desativar BoMs"],
             selectedCriteria: {},
             selectedFile: null as any,
-            availableMachines: [],
-            processes: [],
-            inputBoMs: null as any,
+            currentBranch: null as any,
+            branchMachines: {}, // Will store machines by branch
+            branchBoMs: {}, // Will store BoMs by branch
             criteriaSelected: false,
             machinesRemoved: false,
             missingItemsData: {},
+            lateOrders: {},
             bomsRemoved: false,
             isAlgorithmRunning: false,
             renderKey: 0,
@@ -132,6 +143,8 @@ export default {
                     dbBranch = 'COFACTORY_GR';
                 }
 
+
+                this.currentBranch = dbBranch;
                 this.selectBranchWithParams(dbBranch, userId);
             } else {
                 console.error("Branch or userId missing in URL parameters.");
@@ -166,7 +179,6 @@ export default {
                     this.userID = userId;
                     this.showBranchModal = false;
                     this.showGanttChart = true;
-                    console.log(data.message);
                     this.$nextTick(() => this.updateContentHeight());
                 } else {
                     alert(data.message);
@@ -286,8 +298,11 @@ export default {
                 });
                 const data = await response.json();
                 if (response.ok) {
-                    this.availableMachines = data.machines.map(machine => machine.name);
-                    this.processes = data.processes;
+                    if (!this.branchMachines[this.currentBranch]) {
+                        this.branchMachines[this.currentBranch] = {};
+                    }
+                    this.branchMachines[this.currentBranch].machines = data.machines.map(machine => machine.name);
+                    this.branchMachines[this.currentBranch].processes = data.processes;
                 } else {
                     alert("Erro ao solicitação das máquinas. Por favor tente novamente.");
                 }
@@ -303,7 +318,7 @@ export default {
                 });
                 const data = await response.json();
                 if (response.ok) {
-                    this.inputBoMs = data.item_BoMs;
+                    this.branchBoMs[this.currentBranch] = data.item_BoMs;
                 } else {
                     alert("Erro na solicitação das BOM's. Por favor tente novamente.");
                 }
@@ -432,6 +447,12 @@ export default {
                     .then(data => {
                         if (data.status === 'completed') {
                             this.isAlgorithmRunning = false;
+                            if (!this.lateOrders[this.userID]) {
+                                this.lateOrders[this.userID] = {
+                                    orders: data.late_orders,
+                                    shouldShow: true
+                                };
+                            }
                             this.showResultsModal = true;
                         } else if (data.status === 'error' || data.status === 'aborted') {
                             this.isAlgorithmRunning = false;
@@ -464,6 +485,13 @@ export default {
         closeMissingItemsModal() {
             if (this.missingItemsData[this.userID]) {
                 this.missingItemsData[this.userID].shouldShow = false;
+                delete this.missingItemsData[this.userID];
+            }
+        },
+        closeLateOrdersModal() {
+            if (this.lateOrders[this.userID]) {
+                this.lateOrders[this.userID].shouldShow = false;
+                delete this.lateOrders[this.userID];
             }
         },
         handleResultsConfirm() {
@@ -669,5 +697,39 @@ body {
 
 .enter-user-id {
     margin-right: 60px;
+}
+
+.loading-tooltip {
+    font-weight: bold;
+    top: 150px;
+    left: 10px;
+    position: absolute;
+    display: flex;
+    align-items: center;
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    padding: 10px 17px;
+    box-shadow: 0px 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.loading-spinner {
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid #3498db;
+    border-radius: 50%;
+    width: 25px;
+    height: 25px;
+    animation: spin 1s linear infinite;
+    margin-right: 10px;
+}
+
+@keyframes spin {
+    0% {
+        transform: rotate(0deg);
+    }
+
+    100% {
+        transform: rotate(360deg);
+    }
 }
 </style>

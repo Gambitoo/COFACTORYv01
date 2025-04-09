@@ -170,22 +170,6 @@ class RODPandS():
             
         return [latest_ep_item, self.nextShiftStartTime(start_time, shift_start_times)]
 
-        """# Determine previous material type
-        previous_type = next((item.MaterialType for item in self.DataHandler.Items if item.Name == latest_ep_item), None)
-
-        # Determine start time
-        start_time = max(previous_plan_CoT, self.DataHandler.CurrentTime) if previous_plan_CoT else self.DataHandler.CurrentTime
-
-        # Apply setup time if material type changes
-        current_type = self.ExecutionPlans[0].ItemRelated.MaterialType
-        if current_type != previous_type:
-            setup_time = next(
-                (float(instance.SetupTime) for instance in self.DataHandler.SetupTimesByMaterial
-                 if instance.FromMaterial == previous_type and instance.ToMaterial == current_type), 0.0)
-            start_time += timedelta(hours=setup_time)
-
-        return self.nextShiftStartTime(start_time, shift_start_times)"""
-
     def getSTandCoT(self, data, CT, machine_ST, previous_item_CoT, setup_time):
         data.ST = (previous_item_CoT + timedelta(hours=setup_time)) if previous_item_CoT else machine_ST
         data.ST += timedelta(minutes=(CT * 0.12))
@@ -1150,7 +1134,7 @@ class TorcPandS():
         self.MachinePreviousPlanCoT, self.MachineObjFun = {}, {}
         self.InitialSolution, self.Operations = self.generateInitialSolution()
         self.Check = False
-        self.simulatedAnnealing()
+        self.LateOrders = self.simulatedAnnealing()
 
     def cacheSetupTimes(self):
         """Cache setup times as a dictionary for faster lookups."""
@@ -1212,22 +1196,6 @@ class TorcPandS():
         start_time = max(previous_plan_CoT, self.DataHandler.CurrentTime) if previous_plan_CoT else self.DataHandler.CurrentTime
             
         return [latest_ep_item, self.nextShiftStartTime(start_time, shift_start_times)]
-
-        # Determine previous material type
-        previous_type = next((item.MaterialType for item in self.DataHandler.Items if item.Name == latest_ep_item), None)
-
-        # Determine initial start time
-        start_time = max(previous_plan_CoT, self.DataHandler.CurrentTime) if previous_plan_CoT else self.DataHandler.CurrentTime
-
-        # Check if setup time is needed
-        current_type = self.ExecutionPlans[0].ItemRelated.MaterialType
-        if current_type != previous_type:
-            setup_time = next(
-                (float(instance.SetupTime) for instance in self.DataHandler.SetupTimesByMaterial
-                 if instance.FromMaterial == previous_type and instance.ToMaterial == current_type), 0.0)
-            start_time += timedelta(hours=setup_time)
-
-        return self.nextShiftStartTime(start_time, shift_start_times)
 
     def getBoMItems(self, bom_id):
         return [[item.ItemRelated, item.Quantity] for bom in self.DataHandler.BoMs if bom.id == bom_id for item in bom.BoMItems]
@@ -1751,6 +1719,7 @@ class TorcPandS():
                     previous_item_CoT, previous_type = CoT, current_type
         
         printed_prod_orders = set()
+        printed_prod_names = []
         for machine, operations in best_solution.items():
             for op in operations:
                 _, details = op
@@ -1778,5 +1747,8 @@ class TorcPandS():
 
                     # Mark this production order as printed
                     printed_prod_orders.add(prod_order.id)
+                    printed_prod_names.append(product_name)
+                    
+        return printed_prod_names
         
 

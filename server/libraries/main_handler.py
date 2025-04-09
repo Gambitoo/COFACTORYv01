@@ -60,14 +60,14 @@ def executePandS(dataHandler, PT_Settings):
     """Execute Planning and Scheduling with abort functionality."""
     if abort_event.is_set():
         print("Execution aborted before starting.")
-        return False  # Early abort
+        return False, []  # Early abort
     print("A calcular...\n")
     st = tm.time()
     
     # Step 1: Tref Planning
     if abort_event.is_set():
         print("Execution aborted during Tref calculation.")
-        return False
+        return False, []
     st_Tref = tm.time()
     Tref = TrefPandS(DataHandler=dataHandler)
     Tref.Planning()  # Ensure Tref.Planning() checks for abort periodically
@@ -77,14 +77,14 @@ def executePandS(dataHandler, PT_Settings):
         # Step 2: ROD Planning and Scheduling
         if abort_event.is_set():
             print("Execution aborted during ROD Planning.")
-            return False
+            return False, []
         dataHandler.createRemainingExecPlans(PT_Settings)
         st_ROD = tm.time()
         ROD = RODPandS(DataHandler=dataHandler)
         ROD.Planning()  # Ensure ROD.Planning() checks for abort periodically
         if abort_event.is_set():
             print("Execution aborted during ROD Scheduling.")
-            return False
+            return False, []
         ROD.Scheduling()  # Ensure ROD.Scheduling() checks for abort periodically
         et_ROD = tm.time()
         execution_time_ROD = et_ROD - st_ROD
@@ -92,7 +92,7 @@ def executePandS(dataHandler, PT_Settings):
     # Step 3: Tref Scheduling
     if abort_event.is_set():
         print("Execution aborted during Tref Scheduling.")
-        return False
+        return False, []
     Tref.Scheduling(PT_Settings)  # Ensure Tref.Scheduling() checks for abort periodically
     et_Tref = tm.time()
     execution_time_Tref = (et_Tref - st_Tref) - execution_time_ROD
@@ -100,11 +100,13 @@ def executePandS(dataHandler, PT_Settings):
     # Step 4: Torc
     if abort_event.is_set():
         print("Execution aborted during Torc calculation.")
-        return False
+        return False, []
     st_Torc = tm.time()
-    TorcPandS(DataHandler=dataHandler)  # Ensure TorcPandS() checks for abort periodically
+    Torc = TorcPandS(DataHandler=dataHandler)  # Ensure TorcPandS() checks for abort periodically
     et_Torc = tm.time()
     execution_time_Torc = et_Torc - st_Torc
+    
+    late_orders = Torc.LateOrders
     
     # Finalize
     et = tm.time()
@@ -113,6 +115,6 @@ def executePandS(dataHandler, PT_Settings):
     print(f"Tempo de Execução - Trefilagem: {execution_time_Tref:.2f} segundos")
     print(f"Tempo de Execução - Torção: {execution_time_Torc:.2f} segundos")
     print(f"Tempo de Execução - Total: {execution_time:.2f} segundos\n")
-    return True  # Indicate successful completion
+    return True, late_orders  # Indicate successful completion
 
 
