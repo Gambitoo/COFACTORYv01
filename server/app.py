@@ -209,6 +209,8 @@ async def select_branch():
     # Store paths in session for request context
     session['branch_folder'] = branch_folder
     session['temp_folder'] = temp_folder
+    session['machines_to_remove'] = []
+    session['BoMs_to_remove'] = []
 
     # Create the folders
     os.makedirs(upload_folder, exist_ok=True)
@@ -429,6 +431,7 @@ def process_criteria():
     # Save the criteria in the dataHandler of the respective user
     dataHandler.Criteria = parsed_criteria
     print(parsed_criteria)
+    print(dataHandler.Criteria)
 
     return jsonify({'status': 'success', 'criteria': selected_criteria}), 200
 

@@ -6,38 +6,49 @@ from .utils import (ProductionOrder, Items, ExecutionPlan)
 from .algorithms import (RODPandS, TrefPandS, TorcPandS)
 
 def processExtrusionInput(dataHandler, file_name):
-    no_routings, no_bom = None, []
+    no_routings, no_bom = [], []
     Extrusion_Input = load_workbook(file_name)
     Extrusion_Input_Active = Extrusion_Input.active
     for row in Extrusion_Input_Active.iter_rows(min_row=2, values_only=True):
         product_name, qty, due_date, weight = row[:4]
         item = Items.get_Item(product_name, dataHandler.Database)
-        if item:
-            prod_qty = int(dataHandler.checkStock(product_name, qty) if dataHandler.Criteria[3] else qty)
-            if prod_qty != 0:
-                prod_order = ProductionOrder(item, prod_qty, due_date, weight)
-                dataHandler.ProductionOrders.append(prod_order)
-                no_routings = dataHandler.createExecPlans(item, prod_order)
-        else:
+
+        if not item:
             no_bom.append(product_name)
+            continue
+
+        prod_qty = int(dataHandler.checkStock(product_name, qty) if dataHandler.Criteria[3] else qty)
+
+        if prod_qty == 0:
+            continue
+
+        prod_order = ProductionOrder(item, prod_qty, due_date, weight)
+        dataHandler.ProductionOrders.append(prod_order)
+
+        no_routings_items = dataHandler.createExecPlans(item, prod_order)
+
+        # Only add items that don't already exist
+        for item in no_routings_items:
+            if item not in no_routings:
+                no_routings.append(item)
             
     if dataHandler.Criteria[5]:
         print(dataHandler.Criteria)
         plans_to_exclude = []
 
-        # Iterate over each root Item and its corresponding deactivated BoMs
+        # Iterate over each root item and its corresponding deactivated BoMs
         for item_root, BoMs_to_deactivate in dataHandler.Criteria[5].items():
             stop_flag = False
             plans_by_bom_id = {}
             for exec_plan in dataHandler.ExecutionPlans:
                 if exec_plan.ItemRoot and exec_plan.ItemRoot.Name == item_root:
-                    # Organize the execution plans by BoMId for this root Item
+                    # Organize the execution plans by BoM ID for this root item
                     stop_flag = True
                     plans_by_bom_id.setdefault(exec_plan.BoMId, []).append(exec_plan)
                 elif exec_plan.ItemRelated.Name == item_root and stop_flag:
                     break
             
-            # Now process each BoM for this root Item
+            # Now process each BoM for this root item
             for _, exec_plans in plans_by_bom_id.items():
                 item_list = []
                 for ep in exec_plans:
@@ -53,7 +64,7 @@ def processExtrusionInput(dataHandler, file_name):
         # Remove the execution plans by their id
         for bomId in plans_to_exclude:
             dataHandler.removeEPbyBoMID(bomId)
-
+    
     return no_routings, no_bom
 
 def executePandS(dataHandler, PT_Settings):

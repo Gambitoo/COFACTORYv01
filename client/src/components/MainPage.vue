@@ -395,7 +395,7 @@ export default {
                                 shouldShow: false
                             };
                         }
-
+                        
                         // Update the user's missing items
                         if (data.no_routings && data.no_routings.length > 0) {
                             this.missingItemsData[this.userID].noRoutings = data.no_routings;

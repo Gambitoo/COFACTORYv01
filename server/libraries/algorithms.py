@@ -1203,42 +1203,50 @@ class TorcPandS():
     def getItemST(self, ep, previous_plan_CoT, previous_item_CoT, used_eps, tref_item_CoT, update_STs):
         tref_latest_CoT = datetime.min
         prod_order_id = ep.ProductionOrder.id
+        
         if update_STs:
-            bom_id = next(exec_plan.BoMId for exec_plan in self.DataHandler.ExecutionPlans if exec_plan.ItemRoot
-                          and exec_plan.ItemRoot.Name == ep.ItemRelated.Name and exec_plan.ProductionOrder.id == ep.ProductionOrder.id)
-            bom_items = self.getBoMItems(bom_id)
-
-            for item, quantity in bom_items:
-                if Items.get_Item(item, self.DataHandler.Database).Process == "BUN":
-                    break
-                for _ in range(quantity):
-                    # Filter eligible execution plans with CoT greater than tref_item_CoT[item] if it exists
-                    eligible_eps = [exec_plan for exec_plan in self.DataHandler.ExecutionPlans
-                                    if prod_order_id == exec_plan.ProductionOrder.id
-                                    and item == exec_plan.ItemRelated.Name
-                                    and exec_plan.id not in used_eps
-                                    and (tref_item_CoT.get(item) is None or exec_plan.CoT > tref_item_CoT[item])]
-
-                    # Select the eligible plan with the minimum CoT that meets the required condition
-                    if eligible_eps:
-                        min_ep = min(eligible_eps, key=lambda x: x.CoT)
-                        if min_ep.CoT > max(previous_plan_CoT or datetime.min, previous_item_CoT or datetime.min):
-                            used_eps.append(min_ep.id)
-                            tref_item_CoT[item] = min_ep.CoT
-                            tref_latest_CoT = max(tref_latest_CoT or datetime.min, min_ep.CoT)
-                        else:
-                            break
+            # Find the BOM ID, safely handling the case where it might not exist
+            matching_exec_plans = [exec_plan for exec_plan in self.DataHandler.ExecutionPlans 
+                                  if exec_plan.ItemRoot
+                                  and exec_plan.ItemRoot.Name == ep.ItemRelated.Name 
+                                  and exec_plan.ProductionOrder.id == ep.ProductionOrder.id]
+            
+            # If we found matching execution plans, proceed with BOM processing
+            if matching_exec_plans:
+                bom_id = matching_exec_plans[0].BoMId
+                bom_items = self.getBoMItems(bom_id)
+    
+                for item, quantity in bom_items:
+                    if Items.get_Item(item, self.DataHandler.Database).Process == "BUN":
+                        break
+                    for _ in range(quantity):
+                        # Filter eligible execution plans with CoT greater than the last tref item CoT, if it exists
+                        eligible_eps = [exec_plan for exec_plan in self.DataHandler.ExecutionPlans
+                                       if prod_order_id == exec_plan.ProductionOrder.id
+                                       and item == exec_plan.ItemRelated.Name
+                                       and exec_plan.id not in used_eps
+                                       and (tref_item_CoT.get(item) is None or exec_plan.CoT > tref_item_CoT[item])]
+    
+                        # Select the eligible plan with the minimum CoT that meets the required condition
+                        if eligible_eps:
+                            min_ep = min(eligible_eps, key=lambda x: x.CoT)
+                            if min_ep.CoT > max(previous_plan_CoT or datetime.min, previous_item_CoT or datetime.min):
+                                used_eps.append(min_ep.id)
+                                tref_item_CoT[item] = min_ep.CoT
+                                tref_latest_CoT = max(tref_latest_CoT or datetime.min, min_ep.CoT)
+                            else:
+                                break
+            # If no matching execution plans found, tref_latest_CoT remains as datetime.min
         else:
             tref_latest_CoT = max(
                 (tu.CoT for tu in self.DataHandler.TimeUnits for exec_plan in tu.ExecutionPlans
-                 if prod_order_id == exec_plan.ProductionOrder.id),
-                default=self.DataHandler.CurrentTime.replace(hour=0, minute=0, second=0, microsecond=0)
+                if prod_order_id == exec_plan.ProductionOrder.id), default=self.DataHandler.CurrentTime.replace(hour=0, minute=0, second=0, microsecond=0)
             )
-
+    
         # Return tref_latest_CoT's CoT if it exists; otherwise, max of previous_plan_CoT and previous_item_CoT
         return (
             max(tref_latest_CoT, previous_plan_CoT or datetime.min, previous_item_CoT or datetime.min)), used_eps, tref_item_CoT
-
+    
     def getSTandCoT(self, CT, ST, setup_time):
         ST += timedelta(hours=setup_time) + timedelta(minutes=(CT * 0.08))
         CoT = ST + timedelta(minutes=CT)
@@ -1607,15 +1615,18 @@ class TorcPandS():
             for machine, ops in best_solution.items()
         }
         best_solution = dict(sorted(best_solution.items(), key=lambda x: machine_max_CoT[x[0]]))
+        
 
         used_eps = []
         for machine, ops in best_solution.items():
+            print(machine)
             if not ops:
                 continue
             tref_item_CoT = {}
             previous_type = next((item.MaterialType for item in self.DataHandler.Items if item.Name == self.MachinePreviousPlanCoT[machine][0]), None)
             previous_item_CoT = None
             for _, data in ops:
+                print(data)
                 ST, CoT, current_type, used_eps, tref_item_CoT = self.calculateTimes(machine, data, previous_item_CoT,
                                                                                      previous_type, used_eps,
                                                                                      tref_item_CoT,
@@ -1626,6 +1637,7 @@ class TorcPandS():
 
         special_case = [ep.ItemRoot.Name for ep in self.DataHandler.ExecutionPlans if
                         ep.ItemRoot and ep.ItemRelated.Process == "BUN"]
+        
         special_case_eps = [ep for ep in self.DataHandler.ExecutionPlans if
                             ep.ItemRelated.Process == "BUN" and ep.ItemRelated.Name
                             in special_case]
@@ -1700,12 +1712,14 @@ class TorcPandS():
 
             used_eps = []
             for machine, ops in best_solution.items():
+                print(machine)
                 if not ops:
                     continue
                 tref_item_CoT = {}
                 previous_type = next((item.MaterialType for item in self.DataHandler.Items if item.Name == self.MachinePreviousPlanCoT[machine][0]), None)
                 previous_item_CoT = None
                 for _, data in ops:
+                    print(data)
                     CT = self.getCycleTime(machine, data[0]) * data[1].Quantity
                     ST, CoT, current_type, used_eps, tref_item_CoT = self.calculateTimes(machine, data, previous_item_CoT,
                                                                                          previous_type, used_eps,
