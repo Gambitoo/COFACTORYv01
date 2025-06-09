@@ -589,6 +589,7 @@ def run_algorithm():
     
     # Submit the algorithm to the thread pool
     executor.submit(run_algorithm_in_thread, user_id, dataHandler, PT_Settings)
+    #status, late_orders = executePandS(dataHandler, PT_Settings)
     
     return jsonify({
         'status': 'success',

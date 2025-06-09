@@ -91,6 +91,7 @@ def executePandS(dataHandler, PT_Settings):
             return False, []
         dataHandler.createRemainingExecPlans(PT_Settings)
         st_ROD = tm.time()
+        print("ROD scheduling and planning...")
         ROD = RODPandS(DataHandler=dataHandler)
         ROD.Planning()  # Ensure ROD.Planning() checks for abort periodically
         if abort_event.is_set():
@@ -98,26 +99,35 @@ def executePandS(dataHandler, PT_Settings):
             return False, []
         ROD.Scheduling()  # Ensure ROD.Scheduling() checks for abort periodically
         et_ROD = tm.time()
+        print("ROD - DONE")
         execution_time_ROD = et_ROD - st_ROD
-    
-    # Step 3: Tref Scheduling
+        
+    # Step 3: Initial Tref Scheduling
     if abort_event.is_set():
-        print("Execution aborted during Tref Scheduling.")
+        print("Execution aborted during initial Tref Scheduling.")
         return False, []
-    Tref.Scheduling(PT_Settings)  # Ensure Tref.Scheduling() checks for abort periodically
-    et_Tref = tm.time()
-    execution_time_Tref = (et_Tref - st_Tref) - execution_time_ROD
-    
-    # Step 4: Torc
+    print("Initial TREF scheduling for TORC reference points...")
+    Tref.Scheduling(PT_Settings)
+    print("Tref - DONE")
+        
+    # Step 4: Torc Planning and Scheduling 
     if abort_event.is_set():
         print("Execution aborted during Torc calculation.")
         return False, []
     st_Torc = tm.time()
-    Torc = TorcPandS(DataHandler=dataHandler)  # Ensure TorcPandS() checks for abort periodically
+    late_orders = TorcPandS(DataHandler=dataHandler).LateOrders 
     et_Torc = tm.time()
     execution_time_Torc = et_Torc - st_Torc
+    print("Torc - DONE")
     
-    late_orders = Torc.LateOrders
+    # Step 5: Final Tref Rescheduling
+    if abort_event.is_set():
+        print("Execution aborted during final Tref Scheduling.")
+        return False, []
+    print("Final TREF scheduling based on TORC solution...")
+    Tref.Scheduling(PT_Settings, True)
+    et_Tref = tm.time()
+    execution_time_Tref = (et_Tref - st_Tref) - execution_time_ROD
     
     # Finalize
     et = tm.time()
@@ -126,6 +136,6 @@ def executePandS(dataHandler, PT_Settings):
     print(f"Tempo de Execução - Trefilagem: {execution_time_Tref:.2f} segundos")
     print(f"Tempo de Execução - Torção: {execution_time_Torc:.2f} segundos")
     print(f"Tempo de Execução - Total: {execution_time:.2f} segundos\n")
-    return True, late_orders  # Indicate successful completion
+    return True, late_orders
 
 

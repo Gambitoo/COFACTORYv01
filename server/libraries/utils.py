@@ -28,6 +28,37 @@ class TimeUnit:
     def clear_new_instances(cls):
         cls.new_instances.clear()
         cls.id = 0"""
+        
+    def sort_by_need(self, torc_solution):
+        """
+        Calculate priority based on when TORC items need this TREF item.
+        Returns timestamp of earliest TORC operation that needs any item from this TimeUnit.
+        Lower values = higher priority (needed sooner)
+        """
+        if not torc_solution:
+            return 0
+
+        urgency_score = 0
+        earliest_need = datetime.min
+        
+        for machine, operations in torc_solution.items():
+            for op in operations:
+                _, details = op
+                _, exec_plan, start_time, _ = details
+
+                # Check if this time unit produces items needed by this TORC operation
+                for tu_exec_plan in self.ExecutionPlans:
+                    if (tu_exec_plan.ItemRoot and 
+                        tu_exec_plan.ItemRoot.Name == exec_plan.ItemRelated.Name and
+                        tu_exec_plan.ProductionOrder.id == exec_plan.ProductionOrder.id):
+
+                        earliest_need = min(earliest_need, start_time)
+
+        if earliest_need:
+            # Convert to urgency score (earlier = higher score)
+            urgency_score = (earliest_need - datetime.min).total_seconds()
+
+        return urgency_score
 
     def calculate_average_due_date(self):
         """Organize the Products by Due Date"""
@@ -40,6 +71,7 @@ class TimeUnit:
             return None
 
     def get_average_diameter(self, database):
+        """Get the average diameter of the machine"""
         diameters = [int(Items.get_Item(ep.ItemRelated.Name, database).Diameter * 1000) for ep in self.ExecutionPlans if
                      Items.get_Item(ep.ItemRelated.Name, database)]
         if diameters:
@@ -97,11 +129,14 @@ class TimeUnit:
             return next_shift_start_time(start_time)
 
         def next_shift_start_time(current_time):
+            """Calculate next available shift start time"""
+            current_date = current_time.date()
+        
             for shift_start in shift_start_times:
-                shift_start_dt = datetime.combine(current_time.date(), shift_start)
+                shift_start_dt = datetime.combine(current_date, shift_start)
                 if current_time < shift_start_dt:
                     return shift_start_dt
-            return datetime.combine(current_time.date() + timedelta(days=1), shift_start_times[0])
+            return datetime.combine(current_date + timedelta(days=1), shift_start_times[0])
 
         # Determine start time (ST)
         if previous_TU:
@@ -123,7 +158,7 @@ class TimeUnit:
                 else:
                     self.ST = TU_ST
 
-        # Get max completion time (CoT)
+        # Get max completion time (CoT)      
         max_CT = max(
             (next((routing.CycleTime / 1000) for routing in data_handler.Routings
                   if routing.Item == exec_plan.ItemRelated.Name and routing.Machine == self.Machine)
@@ -269,8 +304,11 @@ class Routings:
             Routings.PT_instances.append(self)
 
 class Items:
+    id = 0
     GR_instances, PT_instances = [], []
     def __init__(self, Name, MaterialType, Unit, Input, Diameter, Process, OrderIncrement, Database):
+        Items.id += 1
+        self.ID = Items.id
         self.Name = Name
         self.MaterialType = MaterialType
         self.Unit = Unit
@@ -331,7 +369,7 @@ class DataHandler:
         # Store process specific data
         self.RODMachines, self.TorcMachines, self.TrefMachines = [], [], []
         self.RODItems, self.TorcItems, self.TrefItems = [], [], []
-        self.RODSolution = None
+        self.RODSolution, self.TorcSolution = None, None
         self.Criteria = {}
     
     def removeEPbyID(self, target_id):
@@ -866,7 +904,7 @@ class DataHandler:
                             main_item, exec_plan.ItemRelated.Name, exec_plan.Quantity, exec_plan.Machine,
                             exec_plan.ProductionOrder.id, time_unit_position, exec_plan.ST, exec_plan.CoT, PlanoId
                         ))
-
+    
     def setupData(self):
         """Setup the user specific data, according to the choosen database"""
         for mach in self.Machines:
@@ -890,4 +928,3 @@ class DataHandler:
         self.ExecutionPlans.clear()
         self.TimeUnits.clear()
         self.ProductionOrders.clear()
-                
