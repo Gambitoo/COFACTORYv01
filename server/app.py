@@ -530,13 +530,14 @@ def run_algorithm_in_thread(user_id, dataHandler, PT_Settings):
         abort_event.clear()
         
         # Run the algorithm
-        status, late_orders = executePandS(dataHandler, PT_Settings)
+        late_orders = executePandS(dataHandler, PT_Settings)
         
         # Update the algorithm status
-        running_algorithms[user_id]["status"] = "completed"
-        running_algorithms[user_id]["success"] = status
-        running_algorithms[user_id]["message"] = "Algoritmo executado com sucesso." if status else "A execução do algoritmo foi abortada."
-        running_algorithms[user_id]["late_orders"] = late_orders
+        if running_algorithms[user_id]["status"] != "aborted":
+            running_algorithms[user_id]["status"] = "completed"
+            running_algorithms[user_id]["success"] = True
+            running_algorithms[user_id]["message"] = "Algoritmo executado com sucesso." 
+            running_algorithms[user_id]["late_orders"] = late_orders
     except Exception as e:
         import traceback
         # Update status with error information
@@ -591,6 +592,8 @@ def run_algorithm():
     executor.submit(run_algorithm_in_thread, user_id, dataHandler, PT_Settings)
     #status, late_orders = executePandS(dataHandler, PT_Settings)
     
+    print(running_algorithms[user_id]["status"])
+    
     return jsonify({
         'status': 'success',
         'message': 'Iniciada a execução do algoritmo.'
@@ -643,9 +646,10 @@ def abort_algorithm():
         
         # Update the algorithm status
         running_algorithms[user_id]["status"] = "aborted"
-        running_algorithms[user_id]["message"] = "Algorithm was aborted by user"
+        running_algorithms[user_id]["success"] = False
+        running_algorithms[user_id]["message"] = "A execução do algoritmo foi abortada."
         
-        return jsonify({'status': 'success', 'message': 'Algoritmo abortado.'}), 200
+        return jsonify({'status': "aborted", 'message': "O algoritmo foi abortado."}), 200
     
     # If we get here, either there's no algorithm for this user or it's already completed
     return jsonify({'status': 'not_found', 'message': 'Não foi encontrado nenhum algoritmo em execução.'}), 404

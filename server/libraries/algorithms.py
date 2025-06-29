@@ -8,6 +8,7 @@ import random
 import math
 import numpy as np
 from collections import Counter, defaultdict
+from .abort_utils import abortable_loop, check_abort, AbortedException
 from .utils import (TimeUnit, Items)
 
 class RODPandS():
@@ -370,41 +371,57 @@ class TrefPandS():
         return False
 
     def Planning(self):
-        """Get the allocation of the tref items throughout the machines, get the CT (Completion Time) of each Execution Plan,
-        order the calculated solutions by average DD (Due Date), and finally create the Time Units and assign the according ST, ET and CT"""
-        best_solutions = self.execPlanCombinations()
-        
-        plans_to_exclude = []
-        for exec_plan in self.DataHandler.ExecutionPlans:
-            exec_plan_found = False
+        """Enhanced Planning with abort checks"""
+        try:
+            check_abort()  # Initial check
+            
+            best_solutions = self.execPlanCombinations()
+            
+            check_abort()  # Check after combinations
+            
+            # Process solutions with abort checks
+            plans_to_exclude = []
+            for exec_plan in abortable_loop(self.DataHandler.ExecutionPlans, check_interval=50):
+                exec_plan_found = False
+                for solutions in best_solutions:
+                    check_abort()  # Check during solution processing
+                    for solution in solutions:
+                        for machine in self.Machines:
+                            if machine.IsActive and (exec_plan.id in solution["allocated_exec_plans"][machine.MachineCode] or
+                                    exec_plan.ItemRelated.Process == "BUN"):
+                                exec_plan_found = True
+                                if exec_plan.id in plans_to_exclude:
+                                    plans_to_exclude.remove(exec_plan.id)
+                if not exec_plan_found:
+                    plans_to_exclude.append(exec_plan.id)
+
+            # Remove excluded plans
+            for ep_id in plans_to_exclude:
+                self.DataHandler.removeEPbyID(ep_id)
+
+            check_abort()  # Check before creating time units
+            
+            # Create time units with abort checks
             for solutions in best_solutions:
-                for solution in solutions:
-                    for machine in self.Machines:
-                        if machine.IsActive and (exec_plan.id in solution["allocated_exec_plans"][machine.MachineCode] or
-                                exec_plan.ItemRelated.Process == "BUN"):
-                            exec_plan_found = True
-                            if exec_plan.id in plans_to_exclude:
-                                plans_to_exclude.remove(exec_plan.id)
-            if not exec_plan_found:
-                plans_to_exclude.append(exec_plan.id)
+                check_abort()
+                for _, solution in enumerate(solutions):
+                    for machine in abortable_loop(self.Machines, check_interval=10):
+                        TUCount = 0
+                        if machine.IsActive and solution["individual_weights_POs"][machine.MachineCode]:
+                            timeUnit = TimeUnit(machine.MachineCode)
+                            self.DataHandler.TimeUnits.append(timeUnit)
+                            for exec_plan in self.DataHandler.ExecutionPlans:
+                                check_abort()  # Check during execution plan processing
+                                for exec_plan_id in solution["allocated_exec_plans"][machine.MachineCode]:
+                                    if exec_plan.id == exec_plan_id:
+                                        timeUnit.ExecutionPlans.append(exec_plan)
+                                        exec_plan.Machine = machine.MachineCode
+                                        TUCount += 1
+                                        exec_plan.Position = TUCount
 
-        for ep_id in plans_to_exclude:
-            self.DataHandler.removeEPbyID(ep_id)
-
-        for solutions in best_solutions:
-            for _, solution in enumerate(solutions):
-                for machine in self.Machines:
-                    TUCount = 0
-                    if machine.IsActive and solution["individual_weights_POs"][machine.MachineCode]:
-                        timeUnit = TimeUnit(machine.MachineCode)
-                        self.DataHandler.TimeUnits.append(timeUnit)
-                        for exec_plan in self.DataHandler.ExecutionPlans:
-                            for exec_plan_id in solution["allocated_exec_plans"][machine.MachineCode]:
-                                if exec_plan.id == exec_plan_id:
-                                    timeUnit.ExecutionPlans.append(exec_plan)
-                                    exec_plan.Machine = machine.MachineCode
-                                    TUCount += 1
-                                    exec_plan.Position = TUCount
+        except AbortedException:
+            print("Tref Planning was aborted")
+            raise
 
     def Scheduling(self, PT_Settings, rearrange = False):
         # Helper function to sort time units based on the configured criteria
@@ -665,98 +682,105 @@ class TrefPandS():
         return Max_CoT, item_count_aux, current_count
 
     def execPlanCombinations(self):
-        # Group the Execution Plans by Production Order and generate combinations in batches of 25.
-        best_solutions = []
-        processed_combinations = 0
-        max_no_improvement = 1000  # Stop after 1000 iterations without improvement within a batch
+        try:
+            # Group the Execution Plans by Production Order and generate combinations in batches of 25.
+            best_solutions = []
+            processed_combinations = 0
+            max_no_improvement = 1000  # Stop after 1000 iterations without improvement within a batch
 
-        # Sort production orders by due date
-        sorted_prod_orders = sorted(self.DataHandler.ProductionOrders, key=lambda po: po.DD)
+            # Sort production orders by due date
+            sorted_prod_orders = sorted(self.DataHandler.ProductionOrders, key=lambda po: po.DD)
 
-        # Initialize prod_exec_plans as a dictionary
-        prod_exec_plans = {}
+            # Initialize prod_exec_plans as a dictionary
+            prod_exec_plans = {}
 
-        for prod_order in sorted_prod_orders:
-            # Filter execution plans by production order ID and exclude BUN process
-            filtered_plans = [ep for ep in self.DataHandler.ExecutionPlans if
-                              ep.ProductionOrder.id == prod_order.id and ep.ItemRelated.Process != "BUN"]
+            for prod_order in abortable_loop(sorted_prod_orders, check_interval=10):
+                # Filter execution plans by production order ID and exclude BUN process
+                filtered_plans = [ep for ep in self.DataHandler.ExecutionPlans if
+                                  ep.ProductionOrder.id == prod_order.id and ep.ItemRelated.Process != "BUN"]
 
-            # Sort filtered plans by ItemRoot.Name for grouping
-            sorted_by_root = sorted(filtered_plans, key=lambda ep: ep.ItemRoot.Name)
+                # Sort filtered plans by ItemRoot.Name for grouping
+                sorted_by_root = sorted(filtered_plans, key=lambda ep: ep.ItemRoot.Name)
 
-            # Initialize list for each production order's BoM combinations
-            root_ep_list = []
+                # Initialize list for each production order's BoM combinations
+                root_ep_list = []
 
-            for _, group_by_root in groupby(sorted_by_root, key=lambda ep: ep.ItemRoot.Name):
-                # Sort by BoMId for secondary grouping
-                sorted_by_bomid = sorted(group_by_root, key=lambda ep: ep.BoMId)
+                for _, group_by_root in groupby(sorted_by_root, key=lambda ep: ep.ItemRoot.Name):
+                    # Sort by BoMId for secondary grouping
+                    sorted_by_bomid = sorted(group_by_root, key=lambda ep: ep.BoMId)
 
-                # Collect grouped lists by BoMId as individual combinations
-                bomid_group = [list(group_by_bomid) for _, group_by_bomid in
-                               groupby(sorted_by_bomid, key=lambda ep: ep.BoMId)]
+                    # Collect grouped lists by BoMId as individual combinations
+                    bomid_group = [list(group_by_bomid) for _, group_by_bomid in
+                                   groupby(sorted_by_bomid, key=lambda ep: ep.BoMId)]
 
-                root_ep_list.append(bomid_group)
+                    root_ep_list.append(bomid_group)
 
-            # Store root_ep_list in dictionary with prod_order.id as the key, flattening one level to fit the combination structure
-            prod_exec_plans[prod_order.id] = list(product(*root_ep_list))
+                # Store root_ep_list in dictionary with prod_order.id as the key, flattening one level to fit the combination structure
+                prod_exec_plans[prod_order.id] = list(product(*root_ep_list))
 
-        batch_size = 25
-        for i in range(0, len(sorted_prod_orders), batch_size):
-            best_solution = None
-            best_solution_weight, best_solution_value, best_solution_size = 0, 0, 0
+            batch_size = 25
+            for i in range(0, len(sorted_prod_orders), batch_size):
+                check_abort()
+                
+                best_solution = None
+                best_solution_weight, best_solution_value, best_solution_size = 0, 0, 0
 
-            batch_prod_orders = sorted_prod_orders[i:i + batch_size]
+                batch_prod_orders = sorted_prod_orders[i:i + batch_size]
 
-            # Filter the exec plans for this batch
-            batch_exec_plans = {
-                prod_order.id: prod_exec_plans[prod_order.id]
-                for prod_order in batch_prod_orders
-                if prod_order.id in prod_exec_plans
-            }
+                # Filter the exec plans for this batch
+                batch_exec_plans = {
+                    prod_order.id: prod_exec_plans[prod_order.id]
+                    for prod_order in batch_prod_orders
+                    if prod_order.id in prod_exec_plans
+                }
 
-            if not batch_exec_plans:
-                continue
+                if not batch_exec_plans:
+                    continue
 
-            no_improvement_iterations = 0  # Reset for each batch
+                no_improvement_iterations = 0  # Reset for each batch
 
-            # Generate combinations for the current batch
-            for combination in product(*batch_exec_plans.values()):
-                st = tm.time()
-                flattened_combination = list(chain.from_iterable(chain.from_iterable(combination)))
-                # Process the combination and get the according solution, weight and value
-                current_solution, current_solution_weight, current_solution_value = self.processCombinations(
-                    flattened_combination)
-                et = tm.time()
-                print(f"Combination processing time: {et - st} seconds")
+                # Generate combinations for the current batch
+                for combination in product(*batch_exec_plans.values()):
+                    check_abort()
+                    
+                    st = tm.time()
+                    flattened_combination = list(chain.from_iterable(chain.from_iterable(combination)))
+                    # Process the combination and get the according solution, weight and value
+                    current_solution, current_solution_weight, current_solution_value = self.processCombinations(
+                        flattened_combination)
+                    et = tm.time()
+                    print(f"Combination processing time: {et - st} seconds")
 
-                # Check if the current solution is better than the best one
-                flag = self.chooseBestSolution(
-                    current_solution_weight, current_solution_value, len(current_solution),
-                    best_solution_weight, best_solution_value, best_solution_size
-                )
-                if flag:
-                    # Update the best solution if the current one is better
-                    best_solution = current_solution
-                    best_solution_weight, best_solution_value, best_solution_size = (
-                        current_solution_weight, current_solution_value, len(current_solution)
+                    # Check if the current solution is better than the best one
+                    flag = self.chooseBestSolution(
+                        current_solution_weight, current_solution_value, len(current_solution),
+                        best_solution_weight, best_solution_value, best_solution_size
                     )
-                    no_improvement_iterations = 0  # Reset if an improvement is found
-                else:
-                    no_improvement_iterations += 1
-                processed_combinations += 1
-                print("No improvement: ", no_improvement_iterations)
+                    if flag:
+                        # Update the best solution if the current one is better
+                        best_solution = current_solution
+                        best_solution_weight, best_solution_value, best_solution_size = (
+                            current_solution_weight, current_solution_value, len(current_solution)
+                        )
+                        no_improvement_iterations = 0  # Reset if an improvement is found
+                    else:
+                        no_improvement_iterations += 1
+                    processed_combinations += 1
+                    print("No improvement: ", no_improvement_iterations)
 
-                # Stop processing combinations within this batch if no improvement is found after 1000 iterations
-                if no_improvement_iterations >= max_no_improvement:
-                    # print(f"No improvement for {max_no_improvement} iterations, moving to next batch.")
-                    break
+                    # Stop processing combinations within this batch if no improvement is found after 1000 iterations
+                    if no_improvement_iterations >= max_no_improvement:
+                        # print(f"No improvement for {max_no_improvement} iterations, moving to next batch.")
+                        break
 
-            best_solutions.append(best_solution)
+                best_solutions.append(best_solution)
 
-        # global total_combinations
-        # print(f"Total Número de Combinações - Trefilagem: {total_combinations}")
-        print(f"Total Número de Combinações Processadas - Trefilagem: {processed_combinations}")
-        return best_solutions
+            # global total_combinations
+            # print(f"Total Número de Combinações - Trefilagem: {total_combinations}")
+            print(f"Total Número de Combinações Processadas - Trefilagem: {processed_combinations}")
+            return best_solutions
+        except AbortedException:
+            print("Tref Planning was aborted")
     
     def processCombinations(self, combination):
         def get_CTs_and_Weights_cache(tref_items, routings, bins, bins_index):

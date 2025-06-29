@@ -13,6 +13,11 @@
                     </ul>
                 </div>
             </div>
+            <div v-if="isAlgorithmRunning">
+                <button @click="IabortAlgorithm" class="terminate-btn">
+                    <span>Terminar algoritmo</span>
+                </button>
+            </div>
             <!--<button @click="createNewPlan" class="create-plan-btn">Criar Novo Plano</button>-->
         </header>
 
@@ -94,7 +99,7 @@ export default {
             isAlgorithmRunning: false,
             renderKey: 0,
             menuOpen: false,
-            apiUrl: `${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`,
+            apiUrl: `http://${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`,
         };
     },
     mounted() {
@@ -560,6 +565,17 @@ export default {
             }
             event.preventDefault();
         },
+        IabortAlgorithm() {
+            if (this.isAlgorithmRunning) {
+                try {
+                    const url = `${this.apiUrl}/abortAlgorithm`;
+                    const data = new Blob([], { type: 'text/plain' });
+                    navigator.sendBeacon(url, data);
+                } catch (error) {
+                    console.error("Erro no envio do sinal de termino do algoritmo:", error);
+                }
+            }
+        },
         refreshGanttChart() {
             this.renderKey++; // Forces re-rendering of GanttChart
         },
@@ -639,6 +655,17 @@ body {
 
 .menu-btn:hover {
     opacity: 0.6;
+}
+
+.terminate-btn {
+    padding: 8px 15px;
+    background-color: #d9534f; /* Red background for terminate action */
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: 0.3s ease;
+    font-size: 14px;
 }
 
 .create-plan-btn {

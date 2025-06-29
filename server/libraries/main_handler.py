@@ -1,7 +1,7 @@
 import time as tm
 from openpyxl import load_workbook
 import time as tm
-from .abort_utils import abort_event
+from .abort_utils import abort_event, AbortedException
 from .utils import (ProductionOrder, Items, ExecutionPlan)
 from .algorithms import (RODPandS, TrefPandS, TorcPandS)
 
@@ -69,73 +69,80 @@ def processExtrusionInput(dataHandler, file_name):
 
 def executePandS(dataHandler, PT_Settings):
     """Execute Planning and Scheduling with abort functionality."""
-    if abort_event.is_set():
-        print("Execution aborted before starting.")
-        return False, []  # Early abort
-    print("A calcular...\n")
-    st = tm.time()
-    
-    # Step 1: Tref Planning
-    if abort_event.is_set():
-        print("Execution aborted during Tref calculation.")
-        return False, []
-    st_Tref = tm.time()
-    Tref = TrefPandS(DataHandler=dataHandler)
-    Tref.Planning()  # Ensure Tref.Planning() checks for abort periodically
-    execution_time_ROD = 0
-    
-    if PT_Settings:
-        # Step 2: ROD Planning and Scheduling
+    try:
         if abort_event.is_set():
-            print("Execution aborted during ROD Planning.")
-            return False, []
-        dataHandler.createRemainingExecPlans(PT_Settings)
-        st_ROD = tm.time()
-        print("ROD scheduling and planning...")
-        ROD = RODPandS(DataHandler=dataHandler)
-        ROD.Planning()  # Ensure ROD.Planning() checks for abort periodically
-        if abort_event.is_set():
-            print("Execution aborted during ROD Scheduling.")
-            return False, []
-        ROD.Scheduling()  # Ensure ROD.Scheduling() checks for abort periodically
-        et_ROD = tm.time()
-        print("ROD - DONE")
-        execution_time_ROD = et_ROD - st_ROD
+            print("Execution aborted before starting.")
+            return []  # Early abort
         
-    # Step 3: Initial Tref Scheduling
-    if abort_event.is_set():
-        print("Execution aborted during initial Tref Scheduling.")
-        return False, []
-    print("Initial TREF scheduling for TORC reference points...")
-    Tref.Scheduling(PT_Settings)
-    print("Tref - DONE")
-        
-    # Step 4: Torc Planning and Scheduling 
-    if abort_event.is_set():
-        print("Execution aborted during Torc calculation.")
-        return False, []
-    st_Torc = tm.time()
-    late_orders = TorcPandS(DataHandler=dataHandler).LateOrders 
-    et_Torc = tm.time()
-    execution_time_Torc = et_Torc - st_Torc
-    print("Torc - DONE")
-    
-    # Step 5: Final Tref Rescheduling
-    if abort_event.is_set():
-        print("Execution aborted during final Tref Scheduling.")
-        return False, []
-    print("Final TREF scheduling based on TORC solution...")
-    Tref.Scheduling(PT_Settings, True)
-    et_Tref = tm.time()
-    execution_time_Tref = (et_Tref - st_Tref) - execution_time_ROD
-    
-    # Finalize
-    et = tm.time()
-    execution_time = et - st
-    print(f"Tempo de Execução - Desbastagem: {execution_time_ROD:.2f} segundos")
-    print(f"Tempo de Execução - Trefilagem: {execution_time_Tref:.2f} segundos")
-    print(f"Tempo de Execução - Torção: {execution_time_Torc:.2f} segundos")
-    print(f"Tempo de Execução - Total: {execution_time:.2f} segundos\n")
-    return True, late_orders
+        print("A calcular...\n")
+        st = tm.time()
 
+        # Step 1: Tref Planning
+        if abort_event.is_set():
+            print("Execution aborted during Tref calculation.")
+            return []
+        st_Tref = tm.time()
+        Tref = TrefPandS(DataHandler=dataHandler)
+        Tref.Planning()  # Ensure Tref.Planning() checks for abort periodically
+        execution_time_ROD = 0
+
+        if PT_Settings:
+            # Step 2: ROD Planning and Scheduling
+            if abort_event.is_set():
+                print("Execution aborted during ROD Planning.")
+                return []
+            dataHandler.createRemainingExecPlans(PT_Settings)
+            st_ROD = tm.time()
+            print("ROD scheduling and planning...")
+            ROD = RODPandS(DataHandler=dataHandler)
+            ROD.Planning()  # Ensure ROD.Planning() checks for abort periodically
+            if abort_event.is_set():
+                print("Execution aborted during ROD Scheduling.")
+                return []
+            ROD.Scheduling()  # Ensure ROD.Scheduling() checks for abort periodically
+            et_ROD = tm.time()
+            print("ROD - DONE")
+            execution_time_ROD = et_ROD - st_ROD
+
+        # Step 3: Initial Tref Scheduling
+        if abort_event.is_set():
+            print("Execution aborted during initial Tref Scheduling.")
+            return []
+        print("Initial TREF scheduling for TORC reference points...")
+        Tref.Scheduling(PT_Settings)
+        print("Tref - DONE")
+
+        # Step 4: Torc Planning and Scheduling 
+        if abort_event.is_set():
+            print("Execution aborted during Torc calculation.")
+            return []
+        st_Torc = tm.time()
+        late_orders = TorcPandS(DataHandler=dataHandler).LateOrders 
+        et_Torc = tm.time()
+        execution_time_Torc = et_Torc - st_Torc
+        print("Torc - DONE")
+
+        # Step 5: Final Tref Rescheduling
+        if abort_event.is_set():
+            print("Execution aborted during final Tref Scheduling.")
+            return []
+        print("Final TREF scheduling based on TORC solution...")
+        Tref.Scheduling(PT_Settings, True)
+        et_Tref = tm.time()
+        execution_time_Tref = (et_Tref - st_Tref) - execution_time_ROD
+
+        # Finalize
+        et = tm.time()
+        execution_time = et - st
+        print(f"Tempo de Execução - Desbastagem: {execution_time_ROD:.2f} segundos")
+        print(f"Tempo de Execução - Trefilagem: {execution_time_Tref:.2f} segundos")
+        print(f"Tempo de Execução - Torção: {execution_time_Torc:.2f} segundos")
+        print(f"Tempo de Execução - Total: {execution_time:.2f} segundos\n")
+        return True, late_orders
+    except AbortedException as e:
+        print(f"Algorithm aborted: {e}")
+        return []
+    except Exception as e:
+        print(f"Algorithm failed with error: {e}")
+        return []
 
