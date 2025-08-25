@@ -22,6 +22,7 @@
             <th>Ficheiro Input</th>
             <th>Ficheiros Output</th>
             <th>Plano</th>
+            <th>Status</th>
           </tr>
         </thead>
         <tbody>
@@ -55,6 +56,16 @@
                 <button @click="openGanttModal(plan)">
                   Ver Plano
                 </button>
+              </div>
+            </td>
+            <td>
+              <div>
+                <span 
+                  :class="getStatusClass(plan)"
+                  @click="handleStatusClick(plan)"
+                  :style="{ cursor: 'pointer' }">
+                  {{ getStatusText(plan) }}
+                </span>
               </div>
             </td>
           </tr>
@@ -462,6 +473,42 @@ export default {
       this.showCriteriaModal = false;
       this.criteria = null;
     },
+    // Status-related methods
+    getStatusText(plan) {
+      if (plan.state === 'temporary') {
+        return 'Plano em processamento';
+      } else if (plan.state === 'created') {
+        return 'Plano gerado';
+      } else if (plan.state === 'accepted') {
+        return 'Plano aceite';
+      } else {
+        return 'Plano gerado';
+      }
+    },
+    getStatusClass(plan) {
+      if (plan.state === 'temporary') {
+        return 'status-processing';
+      } else if (plan.state === 'created') {
+        return 'status-generated';
+      } else if (plan.state === 'accepted') {
+        return 'status-accepted';
+      } else {
+        return 'status-generated';
+      }
+    },
+    getStatusCursor(plan) {
+      // Only allow clicking if the status is 'created' (Plano gerado)
+      return plan.state === 'created' ? 'pointer' : 'default';
+    },
+    handleStatusClick(plan) {
+      // Only allow changing status from 'created' to 'accepted'
+      if (plan.state === 'created') {
+        // Update the plan state locally
+        plan.state = 'accepted';
+      } else if (plan.state === 'accepted') {
+        plan.state = 'created';
+      }
+    },
   },
 };
 </script>
@@ -721,6 +768,45 @@ ul {
   padding: 5px 10px;
   border-radius: 4px;
   background-color: #f9f9f9;
+}
+
+/* Status styles */
+.status-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+.status-processing {
+  color: #ff9800;
+  font-weight: bold;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: #fff3cd;
+  border: 1px solid #ffecb5;
+}
+
+.status-generated {
+  color: #007bff;
+  font-weight: bold;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: #d4edda;
+  border: 1px solid #c3e6cb;
+  transition: background-color 0.3s;
+}
+
+.status-generated:hover {
+  background-color: #c3e6cb;
+}
+
+.status-accepted {
+  color: #28a745;
+  font-weight: bold;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: #d1ecf1;
+  border: 1px solid #bee5eb;
 }
 
 h2 {

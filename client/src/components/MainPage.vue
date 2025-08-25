@@ -1,7 +1,7 @@
 <template>
     <div class="main-view">
         <header class="header">
-            <div ref="detectOutsideClick" class="left-section">
+            <div ref="detectOutsideClick" class="main-section">
                 <button @click="toggleMenu" class="menu-btn">
                     <font-awesome-icon icon="fa-solid fa-bars" />
                 </button>
@@ -13,10 +13,23 @@
                     </ul>
                 </div>
             </div>
-            <div v-if="isAlgorithmRunning">
-                <button @click="IabortAlgorithm" class="terminate-btn">
-                    <span>Terminar algoritmo</span>
+            <div v-if="isAdmin" ref="adminSection" class="admin-section" >
+                <button @click="toggleAlgorithmMenu" class="terminate-btn">
+                    <span>Terminar processamento</span>
+                    <font-awesome-icon icon="fa-solid fa-caret-down" class="terminate-dropdown-icon"/>
                 </button>
+                <div v-if="algorithmMenuOpen" class="dropdown-menu admin-dropdown">
+                    <ul v-if="activeUsers.length > 0">
+                        <li v-for="userId in activeUsers" :key="userId" @click="abortUserAlgorithm(userId)">
+                            <span>{{ userId }}</span>
+                        </li>
+                    </ul>
+                    <ul v-else>
+                        <li class="no-users">
+                            <span>Nenhum algoritmo ativo</span>
+                        </li>
+                    </ul>
+                </div>
             </div>
             <!--<button @click="createNewPlan" class="create-plan-btn">Criar Novo Plano</button>-->
         </header>
@@ -45,8 +58,8 @@
         <RemoveBoMsModal v-if="showRemoveBoMsModal" :BoMs="branchBoMs[currentBranch] || null"
             @confirm="handleRemoveBoMsConfirm" @close="closeRemoveBoMsModal" />
 
-        <ResultsModal v-if="showResultsModal" @confirm="handleResultsConfirm" @cancel="closeResultsModal"
-            @rerun="rerunPlan" />
+        <!--<ResultsModal v-if="showResultsModal" @confirm="handleResultsConfirm" @cancel="closeResultsModal"
+            @rerun="rerunPlan" />-->
 
         <MissingItemsModal v-if="missingItemsData[userID]?.shouldShow"
             :noRoutings="missingItemsData[userID]?.noRoutings || []" :noBoms="missingItemsData[userID]?.noBoms || []"
@@ -97,23 +110,33 @@ export default {
             lateOrders: {},
             bomsRemoved: false,
             isAlgorithmRunning: false,
+            isAdmin: false,
             renderKey: 0,
             menuOpen: false,
+            algorithmMenuOpen: false,
+            activeUsers: [],
             apiUrl: `http://${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`,
         };
     },
     mounted() {
-        window.addEventListener("beforeunload", this.handlePageUnload);
+        //window.addEventListener("beforeunload", this.handlePageUnload);
+        window.addEventListener("statuscheck", this.pollAlgorithmStatus);
         document.addEventListener('click', this.handleClickOutside);
+        //window.addEventListener("admincheck", this.checkAdminPriviliges);
         this.checkUrlParameters();
 
         // Add resize listener to adjust content height
         window.addEventListener('resize', this.updateContentHeight);
         this.updateContentHeight();
+
+        this.pollAlgorithmStatus();
+        this.checkAdminPriviliges();
     },
     beforeDestroy() {
-        window.removeEventListener("beforeunload", this.handlePageUnload);
+        //window.removeEventListener("beforeunload", this.handlePageUnload);
+        window.removeEventListener("statuscheck", this.pollAlgorithmStatus);
         document.removeEventListener('click', this.handleClickOutside);
+        window.removeEventListener("admincheck", this.checkAdminPriviliges);
         window.removeEventListener('resize', this.updateContentHeight);
     },
     methods: {
@@ -126,8 +149,14 @@ export default {
             document.documentElement.style.setProperty('--content-min-height', `${minContentHeight}px`);
         },
         handleClickOutside(event) {
+            // Check if click is outside the main menu
             if (this.$refs.detectOutsideClick && !this.$refs.detectOutsideClick.contains(event.target)) {
                 this.menuOpen = false;
+            }
+            
+            // Check if click is outside the admin menu
+            if (this.$refs.adminSection && !this.$refs.adminSection.contains(event.target)) {
+                this.algorithmMenuOpen = false;
             }
         },
         // Check and get URL parameters
@@ -148,16 +177,42 @@ export default {
                     dbBranch = 'COFACTORY_GR';
                 }
 
-
                 this.currentBranch = dbBranch;
                 this.selectBranchWithParams(dbBranch, userId);
             } else {
-                console.error("Branch or userId missing in URL parameters.");
+                console.error("Branch ou userId missing in URL parameters.");
             }
 
         },
         toggleMenu() {
             this.menuOpen = !this.menuOpen;
+        },
+        toggleAlgorithmMenu() {
+            this.algorithmMenuOpen = !this.algorithmMenuOpen;
+            if (this.algorithmMenuOpen) {
+                this.menuOpen = false;
+                this.getActiveUsers();
+            }
+        },
+        async getActiveUsers() {
+            try {
+                const response = await fetch(`${this.apiUrl}/activeAlgorithms?user_id=${this.userID}`, {
+                    method: "GET",
+                    credentials: 'include',
+                    headers: { "Content-Type": "application/json" },
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    this.activeUsers = data.active_users || [];
+                } else {
+                    console.error(`Erro na obtenção dos utilizadores ativos: ${response.status} ${response.statusText}`);
+                    this.activeUsers = [];
+                }
+            } catch (error) {
+                console.error("[activeAlgorithms] Erro na obtenção dos utilizadores ativos:", error);
+                this.activeUsers = [];
+            }
         },
         openPlanHistoryPage() {
             this.showPlanHistory = true;
@@ -189,8 +244,7 @@ export default {
                     alert(data.message);
                 }
             } catch (error) {
-                console.error("Erro ao selecionar a unidade de produção:", error);
-                alert(error);
+                console.error("[selectBranch] Erro no selecionamento da unidade de produção:", error);
             }
         },
         async createNewPlan() {
@@ -255,7 +309,7 @@ export default {
                 }
 
             } catch (error) {
-                console.error("Error:", error);
+                console.error("[uploadInputFile] Erro no upload do ficheiro de input:", error);
                 alert("Ocorreu um erro. Por favor tente novamente.");
             }
         },
@@ -263,18 +317,22 @@ export default {
             console.log("Critérios:", selectedCriteria);
             this.criteriaSelected = true;
 
-            await fetch(`${this.apiUrl}/criteria?user_id=${this.userID}`, {
-                method: "POST",
-                credentials: 'include',
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ selectedCriteria, allCriteria: this.criteria }),
-            })
-                .then((response) => response.json())
-                .catch(() => {
-                    alert("Erro no processamento dos critérios. Por favor tente novamente.");
-                });
+            try {
+                const response = await fetch(`${this.apiUrl}/criteria?user_id=${this.userID}`, {
+                    method: "POST",
+                    credentials: 'include',
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify({ selectedCriteria, allCriteria: this.criteria }),
+                })
+
+                if (!response.ok) {
+                    alert("Erro no processamento dos critérios. Por favor tente novamente.")
+                }
+            } catch (error) {
+                console.error("[criteria] Erro no processamento dos critérios:", error);
+            }
 
             this.showCriteriaModal = false;
 
@@ -312,7 +370,7 @@ export default {
                     alert("Erro ao solicitação das máquinas. Por favor tente novamente.");
                 }
             } catch (error) {
-                alert("Erro na solicitação das máquinas. Por favor tente novamente.");
+                console.log("[machines] Erro na solicitação das máquinas:", error);
             }
         },
         async fetchBoMs() {
@@ -328,7 +386,7 @@ export default {
                     alert("Erro na solicitação das BOM's. Por favor tente novamente.");
                 }
             } catch (error) {
-                alert("Erro na solicitação das BOM's. Por favor tente novamente.");
+                console.log("[BoMs] Erro na obtenção das BOM's:", error);
             }
         },
         handleRemoveMachinesConfirm(selectedMachines) {
@@ -458,11 +516,17 @@ export default {
                                     shouldShow: true
                                 };
                             }
-                            this.showResultsModal = true;
-                        } else if (data.status === 'error' || data.status === 'aborted') {
+
+                            //this.showResultsModal = true;
+                            //this.handleResultsConfirm();
+                        } else if (data.status === 'error') {
                             this.isAlgorithmRunning = false;
-                            console.error("Algorithm failed:", data.message);
+                            console.error("Algoritmo falhou:", data.message);
                             alert("Ocorreu um erro na execução do algoritmo. Por favor tente novamente.");
+                        } else if (data.status === 'aborted') {
+                            this.isAlgorithmRunning = false;
+                            console.log("Algoritmo abortado:", data.message);
+                            alert("Algoritmo abortado.");
                         } else if (data.status === 'not_running') {
                             // Algorithm is no longer running
                             this.isAlgorithmRunning = false;
@@ -501,7 +565,7 @@ export default {
         },
         handleResultsConfirm() {
             this.showResultsModal = false;
-            fetch(`${this.apiUrl}/saveResults?user_id=${this.userID}`, {
+            fetch(`${this.apiUrl}/savePlan?user_id=${this.userID}`, {
                 method: 'POST',
                 credentials: 'include',
             })
@@ -553,7 +617,7 @@ export default {
             this.criteria = criteria;
             this.showCriteriaModal = true;
         },
-        async handlePageUnload(event: Event) {
+        /*async handlePageUnload(event: Event) {
             if (this.isAlgorithmRunning) {
                 try {
                     const url = `${this.apiUrl}/abortAlgorithm`;
@@ -564,8 +628,8 @@ export default {
                 }
             }
             event.preventDefault();
-        },
-        IabortAlgorithm() {
+        },*/
+        abortAlgorithm() {
             if (this.isAlgorithmRunning) {
                 try {
                     const url = `${this.apiUrl}/abortAlgorithm`;
@@ -575,6 +639,31 @@ export default {
                     console.error("Erro no envio do sinal de termino do algoritmo:", error);
                 }
             }
+        },
+        async abortUserAlgorithm(userId) {
+            try {
+                const response = await fetch(`${this.apiUrl}/abortAlgorithm`, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: userId }),
+                });
+                
+                if (response.ok) {
+                    alert(`Algoritmo do utilizador ${userId} foi terminado.`);
+                    // Refresh the active users list
+                    this.getActiveUsers();
+                } else {
+                    const data = await response.json();
+                    alert(`Erro ao terminar algoritmo: ${data.message}`);
+                }
+            } catch (error) {
+                console.error("[abortAlgorithm] Erro ao terminar algoritmo:", error);
+                alert("Erro ao terminar algoritmo.");
+            }
+            
+            // Close the dropdown
+            this.algorithmMenuOpen = false;
         },
         refreshGanttChart() {
             this.renderKey++; // Forces re-rendering of GanttChart
@@ -588,6 +677,32 @@ export default {
                     console.error("Erro na solicitação de eliminação do ficheiro:", error);
                 });
         },
+        async checkAdminPriviliges() {
+            try {
+                const response = await fetch(`${this.apiUrl}/checkAdminPriviliges?user_id=${this.userID}`, {
+                    method: 'GET',
+                    credentials: 'include',
+                    headers: { "Content-Type": "application/json" },
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data.isAdmin == true) {
+                        this.isAdmin = true;
+                    }
+                    else {
+                        this.isAdmin = false;
+                    }
+                }
+                else {
+                    console.error("Erro na verificação do status do utilizador.");
+                    alert("Erro na verificação do status do utilizador.");
+                }
+            } catch (error) {
+                console.log("[checkAdminPriviliges] Erro na verificação do status do utilizador:", error);
+                alert("Erro na verificação do status do utilizador.");
+            }
+        }
     },
 };
 </script>
@@ -633,11 +748,17 @@ body {
     margin: 0;
 }
 
-.left-section {
+.main-section {
     position: relative;
     display: flex;
     align-items: center;
     gap: 15px;
+}
+
+.admin-section {
+    position: relative;
+    display: flex;
+    align-items: center;
 }
 
 .menu-btn {
@@ -666,6 +787,16 @@ body {
     cursor: pointer;
     transition: 0.3s ease;
     font-size: 14px;
+
+}
+
+.terminate-btn:hover {
+    background-color: #ac433f
+}
+
+.terminate-dropdown-icon {
+    font-size: 1.2em;
+    margin-left: 6px;
 }
 
 .create-plan-btn {
@@ -696,6 +827,11 @@ body {
     z-index: 100;
 }
 
+.admin-dropdown {
+    right: 0;
+    left: auto;
+}
+
 .dropdown-menu ul {
     list-style: none;
     padding: 0;
@@ -710,6 +846,16 @@ body {
 
 .dropdown-menu li:hover {
     background-color: #f0f0f0;
+}
+
+.dropdown-menu li.no-users {
+    cursor: default;
+    text-align: center;
+    color: #666;
+}
+
+.dropdown-menu li.no-users:hover {
+    background-color: transparent;
 }
 
 /* Modal overlay: remains fully interactive */

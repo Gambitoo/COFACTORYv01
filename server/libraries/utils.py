@@ -41,7 +41,7 @@ class TimeUnit:
         urgency_score = 0
         earliest_need = datetime.min
         
-        for machine, operations in torc_solution.items():
+        for _, operations in torc_solution.items():
             for op in operations:
                 _, details = op
                 _, exec_plan, start_time, _ = details
@@ -170,7 +170,7 @@ class TimeUnit:
 class BoM:
     id = 0
     GR_instances, PT_instances = [], []
-    def __init__(self, ItemRoot, BoMQuantity, BoMQuantityUnit, Revision, Default, Database):
+    def __init__(self, ItemRoot, BoMQuantity, BoMQuantityUnit, Revision, Default):
         BoM.id += 1
         self.id = BoM.id
         self.ItemRoot = ItemRoot
@@ -179,11 +179,6 @@ class BoM:
         self.BoMItems = []
         self.Revision = Revision
         self.Default = Default
-        
-        if Database == "COFACTORY_GR":
-            BoM.GR_instances.append(self)
-        elif Database == "COFACTORY_PT":
-            BoM.PT_instances.append(self)
 
     @classmethod
     def clear_instances(cls):
@@ -271,17 +266,12 @@ class ExecutionPlan:
 
 class Machines:
     GR_instances, PT_instances = [], []
-    def __init__(self, MachineCode, Input, Output, RunningTimeFactor, Database):
+    def __init__(self, MachineCode, Input, Output, RunningTimeFactor):
         self.MachineCode = MachineCode
         self.Input = Input
         self.Output = Output
         self.RunningTimeFactor = RunningTimeFactor
         self.IsActive = True
-        
-        if Database == "COFACTORY_GR":
-            Machines.GR_instances.append(self)
-        elif Database == "COFACTORY_PT":
-            Machines.PT_instances.append(self)
         
     @classmethod
     def clear_instances(cls):
@@ -292,21 +282,16 @@ class Machines:
 
 class Routings:
     GR_instances, PT_instances = [], []
-    def __init__(self, Item, Machine, CycleTime, Weight, Database):
+    def __init__(self, Item, Machine, CycleTime, Weight):
         self.Item = Item
         self.Machine = Machine
         self.CycleTime = CycleTime
         self.Weight = Weight
-        
-        if Database == "COFACTORY_GR":
-            Routings.GR_instances.append(self)
-        elif Database == "COFACTORY_PT":
-            Routings.PT_instances.append(self)
 
 class Items:
     id = 0
     GR_instances, PT_instances = [], []
-    def __init__(self, Name, MaterialType, Unit, Input, Diameter, Process, OrderIncrement, Database):
+    def __init__(self, Name, MaterialType, Unit, Input, Diameter, Process, OrderIncrement):
         Items.id += 1
         self.ID = Items.id
         self.Name = Name
@@ -317,11 +302,6 @@ class Items:
         self.Diameter = Diameter
         self.Category = None
         self.OrderIncrement = OrderIncrement
-        
-        if Database == "COFACTORY_GR":
-            Items.GR_instances.append(self)
-        elif Database == "COFACTORY_PT":
-            Items.PT_instances.append(self)
     
     @classmethod
     def get_Item(cls, name, database):
@@ -330,29 +310,29 @@ class Items:
 
 class SetupTimesByMaterial:
     GR_instances, PT_instances = [], []
-    def __init__(self, FromMaterial, ToMaterial, SetupTime, Database):
+    def __init__(self, FromMaterial, ToMaterial, SetupTime):
         self.FromMaterial = FromMaterial
         self.ToMaterial = ToMaterial
         self.SetupTime = SetupTime
-        
-        if Database == "COFACTORY_GR":
-            SetupTimesByMaterial.GR_instances.append(self)
-        elif Database == "COFACTORY_PT":
-            SetupTimesByMaterial.PT_instances.append(self)
 
 class Stock:
     GR_instances, PT_instances = [], []
-    def __init__(self, Warehouse, Item, StockAvailable, StockAllocated, StockEconomic, Database):
+    def __init__(self, Warehouse, Item, StockAvailable, StockAllocated, StockEconomic):
         self.Warehouse = Warehouse
         self.Item = Item
         self.StockAvailable = StockAvailable
         self.StockAllocated = StockAllocated
         self.StockEconomic = StockEconomic
         
-        if Database == "COFACTORY_GR":
-            Stock.GR_instances.append(self)
-        elif Database == "COFACTORY_PT":
-            Stock.PT_instances.append(self)
+class LN_ProductionOrders:
+    GR_instances, PT_instances = [], []
+    def __init__(self, ID, Item, Routing, Quantity, ST, CoT):
+        self.ID = ID
+        self.Item = Item
+        self.Routing = Routing
+        self.Quantity = Quantity
+        self.ST = ST
+        self.CoT = CoT
 
 class DataHandler:
     def __init__(self, database, connection_string):
@@ -442,64 +422,93 @@ class DataHandler:
                         instance.StockAvailable = 0
         return qty
 
-    def createExecPlans(self, main_item, prod_order):
+    def createExecutionPlans(self, main_item, prod_order):
         no_routings = []
-        def if_routing_exists(item_name, machines):
+        no_boms = []
+        
+        machines_Torc = [machine.MachineCode for machine in self.TorcMachines if machine.IsActive]
+        machines_Tref = [machine.MachineCode for machine in self.TrefMachines if machine.IsActive]
+        
+        def has_routing(item_name, machines):
             """Check if there is a valid routing for the given item and machine list."""
             return any(routing.Item == item_name and routing.Machine in machines for routing in self.Routings)
+
+        def has_bom(item_name):
+            """Check if there is a valid BoM for the given item."""
+            return any(bom.ItemRoot == item_name for bom in self.BoMs)
         
-        def create_eps(bom, quantity, prod_order, first_iter, parent_item=None):
+        def create_execution_plan(parent_item, item, quantity, bom_id, prod_order):
+            """Create and add execution plan."""
+            ep = ExecutionPlan(parent_item, item, float(quantity), bom_id, prod_order)
+            self.ExecutionPlans.append(ep)
+        
+        def process_bom_items(bom, quantity, prod_order, is_main_item=False, parent_item=None):
             main_item = Items.get_Item(bom.ItemRoot, self.Database)
             
-            # Criar plano de execução para o item principal se for a primeira iteração
-            if first_iter and if_routing_exists(main_item.Name, machines_Torc):
-                ep = ExecutionPlan(None, main_item, float(quantity), None, prod_order)
-                self.ExecutionPlans.append(ep)
-            elif not if_routing_exists(main_item.Name, machines_Torc):
+            # Create execution plan for main item if it's the first iteration
+            if is_main_item and has_routing(main_item.Name, machines_Torc):
+                create_execution_plan(None, main_item, quantity, None, prod_order)
+            elif is_main_item and not has_routing(main_item.Name, machines_Torc):
                 no_routings.append(main_item.Name)
                 return
 
+            # Process each BpM item
             for BoM_Item in bom.BoMItems:
                 item = Items.get_Item(BoM_Item.ItemRelated, self.Database)
                 production_qty = (BoM_Item.NetQuantity * quantity) / bom.BoMQuantity
 
-                # Determinar se é Torc ou Tref com base no parent item
+                # Determine machine list based on parent item (tref or torc)
                 machine_list = machines_Torc if parent_item is None or parent_item.Process == "BUN" else machines_Tref
 
                 if item.Process == "BUN":
-                    # Criar plano de execução para o item atual
+                    # Process each quantity
                     for _ in range(BoM_Item.Quantity):
-                        if if_routing_exists(item.Name, machine_list):
-                            ep = ExecutionPlan(main_item if parent_item is None else parent_item, item,
-                                          float(production_qty), bom.id, prod_order)
-                            self.ExecutionPlans.append(ep)
-                        else:
+                        if not has_routing(item.Name, machine_list):
                             no_routings.append(item.Name)
-                        # Recursivamente chamar a função para os itens filhos no BoM
+                            continue
+                            
+                        if not has_bom(item.Name):
+                            no_boms.append(item.Name)
+                            continue
+                            
+                        # Create execution plan for the current item
+                        parent_for_ep = main_item if parent_item is None else parent_item
+                        create_execution_plan(parent_for_ep, item, production_qty, bom.id, prod_order)
+                        
+                        # Recursively process sub-BoMs
                         for sub_bom in self.BoMs:
                             if sub_bom.ItemRoot == item.Name:
-                                create_eps(sub_bom, production_qty, prod_order, False, item)
+                                create_execution_plan(sub_bom, production_qty, prod_order, False, item)
                 else:
-                    # Criar plano de execução para itens que não são BUN
+                    # Create execution plans for items that are not BUN
                     for _ in range(BoM_Item.Quantity):
-                        if if_routing_exists(item.Name, machines_Tref):
-                            ep = ExecutionPlan(main_item if parent_item is None else parent_item, item,
-                                          float(production_qty), bom.id, prod_order)
-                            self.ExecutionPlans.append(ep)
-                        else:
+                        if not has_routing(item.Name, machines_Tref):
                             no_routings.append(item.Name)
+                            continue
+                            
+                        if not has_bom(item.Name):
+                            no_boms.append(item.Name)
+                            continue
+                            
+                        # Create execution plan for the current item
+                        parent_for_ep = main_item if parent_item is None else parent_item
+                        create_execution_plan(parent_for_ep, item, production_qty, bom.id, prod_order)
 
-        machines_Torc = [machine.MachineCode for machine in self.TorcMachines if machine.IsActive]
-        machines_Tref = [machine.MachineCode for machine in self.TrefMachines if machine.IsActive]
+        # Check if main item has BoM
+        if not has_bom(main_item.Name):
+            no_boms.append(main_item.Name)
+            return no_routings, no_boms
 
+        # Calculate quantities
         order_increment = main_item.OrderIncrement
         total_qty, remainder_qty = divmod(prod_order.Quantity, order_increment)
 
+        # Process quantities
         for _ in range(int(total_qty)):
             first_iteration = True
             for bom in self.BoMs:
                 if bom.ItemRoot == main_item.Name:
-                    create_eps(bom, order_increment, prod_order, first_iteration)
+                    process_bom_items(bom, order_increment, prod_order, first_iteration)
                     if first_iteration:
                         first_iteration = False
 
@@ -507,13 +516,13 @@ class DataHandler:
             first_iteration = True
             for bom in self.BoMs:
                 if bom.ItemRoot == main_item.Name:
-                    create_eps(bom, remainder_qty, prod_order, first_iteration)
+                    process_bom_items(bom, remainder_qty, prod_order, first_iteration)
                     if first_iteration:
                         first_iteration = False
 
-        return no_routings
+        return no_routings, no_boms
     
-    def createRemainingExecPlans(self, PT_Settings):
+    def createRemainingExecutionPlans(self, PT_Settings):
         Tref_items = {}
 
         for TU in self.TimeUnits:
@@ -609,7 +618,6 @@ class DataHandler:
                         bom_data["BoMQuantityUnit"],
                         None,
                         default,
-                        database
                     )
                     bom_items = [
                         BoMItem(
@@ -622,6 +630,12 @@ class DataHandler:
                         )
                         for item, item_data in bom_data["items"].items()
                     ]
+                    
+                    if database == "COFACTORY_GR":
+                        BoM.GR_instances.append(bom)
+                    elif database == "COFACTORY_PT":
+                        BoM.PT_instances.append(bom)
+                    
                     bom.add_BoM_items(*bom_items)
 
                 else:
@@ -633,7 +647,6 @@ class DataHandler:
                             bom_data["BoMQuantityUnit"],
                             default,
                             revision,
-                            database
                         )
                         bom_items = [
                             BoMItem(
@@ -646,35 +659,66 @@ class DataHandler:
                             )
                             for item, item_data in items.items()
                         ]
+                        
+                        if database == "COFACTORY_GR":
+                            BoM.GR_instances.append(bom)
+                        elif database == "COFACTORY_PT":
+                            BoM.PT_instances.append(bom)
+                            
                         bom.add_BoM_items(*bom_items)
 
         def create_routing_objects(rows):
             for row in rows:
                 main_item, machine, cycle_time, weight = row
-                Routings(main_item, machine, cycle_time, int(weight), database)
+                routing = Routings(main_item, machine, cycle_time, int(weight))
+                
+                if database == "COFACTORY_GR":
+                    Routings.GR_instances.append(routing)
+                elif database == "COFACTORY_PT":
+                    Routings.PT_instances.append(routing)
 
         def create_items_objects(rows):
             for row in rows:
                 main_item, input, diameter, unit, order_increment, process, material_type = row
                 process = process if isinstance(process, str) and process != "-" else None
-                Items(main_item, material_type, unit, input, round(diameter, 3), process, order_increment, database)
+                item = Items(main_item, material_type, unit, input, round(diameter, 3), process, order_increment)
+                
+                if database == "COFACTORY_GR":
+                    Items.GR_instances.append(item)
+                elif database == "COFACTORY_PT":
+                    Items.PT_instances.append(item)
                 
         def create_machines_objects(rows):
             for row in rows:
                 main_item, output, input, RT = row
                 if database == 'COFACTORY_PT' and main_item in {'MDW002', 'ROD004'}:
                     continue
-                Machines(main_item, input, output, RT, database)
+                machine = Machines(main_item, input, output, RT)
+                
+                if database == "COFACTORY_GR":
+                    Machines.GR_instances.append(machine)
+                elif database == "COFACTORY_PT":
+                    Machines.PT_instances.append(machine)
 
         def create_setup_times_objects(rows):
             for row in rows:
                 from_material, to_material, setup_time = row
-                SetupTimesByMaterial(from_material, to_material, setup_time, database)
+                setup = SetupTimesByMaterial(from_material, to_material, setup_time)
+                
+                if database == "COFACTORY_GR":
+                    SetupTimesByMaterial.GR_instances.append(setup)
+                elif database == "COFACTORY_PT":
+                    SetupTimesByMaterial.PT_instances.append(setup)
 
         def create_stock_objects(rows):
             for row in rows:
                 warehouse, item, stock_available, stock_allocated, stock_economic = row
-                Stock(warehouse, item, stock_available, stock_allocated, stock_economic, database)
+                stock =Stock(warehouse, item, stock_available, stock_allocated, stock_economic)
+                
+                if database == "COFACTORY_GR":
+                    Stock.GR_instances.append(stock)
+                elif database == "COFACTORY_PT":
+                    Stock.PT_instances.append(stock)
 
         def create_timeunits_objects(rows):
             for row in rows:
@@ -723,6 +767,26 @@ class DataHandler:
 
                 if exec_plan_instance and time_unit_instance:
                     time_unit_instance.ExecutionPlans.append(exec_plan_instance)
+                    
+        def create_ln_production_orders_objects(rows):
+            instance_lists = {
+                "COFACTORY_GR": LN_ProductionOrders.GR_instances,
+                "COFACTORY_PT": LN_ProductionOrders.PT_instances
+            }
+
+            for row in rows:
+                id, item_name, machine_code, quantity, st, cot = row
+                item = Items.get_Item(item_name, database)
+
+                # Check if item meets criteria
+                is_valid = (
+                    (item.Process in ['ROD', 'MDW'] and item.Name.startswith('D')) or
+                    (item.Process == 'BUN' and item.Name.startswith('B'))
+                )
+
+                if is_valid and database in instance_lists:
+                    ln_po = LN_ProductionOrders(id, item, machine_code, quantity, st, cot)
+                    instance_lists[database].append(ln_po)
 
         queries = {
             "boms": "SELECT Boms.MainItem, Boms.Quantity, Boms.QuantityUnit, Boms.Position, Boms.Item, Boms.NetQuantity, Boms.NetQuantityUnit FROM Boms JOIN Items i ON MainItem = i.Item WHERE i.Process IN ('ROD', 'MDW', 'BUN')",
@@ -734,7 +798,8 @@ class DataHandler:
             "stock": "SELECT Warehouse, Item, StockAvailable, StockAllocated, StockEconomic FROM Stock",
             "timeunits": "SELECT id, Machine, StartTime, CompletionTime FROM TimeUnits",
             "execution_plans": "SELECT id, MainItem, Item, Quantity, Machine, ProductionOrder, Position, StartTime, CompletionTime, PlanoId FROM ExecutionPlans",
-            "timeunit_executionplans": "SELECT tep.TimeUnitId, tep.ExecutionPlanId FROM TimeUnitExecutionPlans tep JOIN TimeUnits tu ON tep.TimeUnitId = tu.id JOIN ExecutionPlans ep ON tep.ExecutionPlanId = ep.id"
+            "timeunit_executionplans": "SELECT tep.TimeUnitId, tep.ExecutionPlanId FROM TimeUnitExecutionPlans tep JOIN TimeUnits tu ON tep.TimeUnitId = tu.id JOIN ExecutionPlans ep ON tep.ExecutionPlanId = ep.id",
+            "production_orders": "SELECT ProductionOrderNumber, Item, Routing, QuantityOrdered, ProductionStartDateTime, PlannedDeliveryDateTime FROM ProductionOrders WHERE ((Routing LIKE 'BUN0%' OR Routing LIKE 'BMC%' OR Routing LIKE 'MDW0%' OR Routing LIKE 'ROD0%') AND (OrderStatus = '4' OR OrderStatus = '6'))"
         }
 
         data = fetch_data(queries)
@@ -761,6 +826,8 @@ class DataHandler:
         create_executionplans_objects(data["execution_plans"])
 
         create_timeunit_executionplans_objects(data["timeunit_executionplans"])
+        
+        create_ln_production_orders_objects(data["production_orders"])
 
     def writeExcelData(self, PT_Settings, detailed):
         wb = Workbook()

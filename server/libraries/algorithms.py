@@ -160,13 +160,22 @@ class RODPandS():
         with pyodbc.connect(self.DataHandler.ConnectionString) as conn, conn.cursor() as cursor:
             # Get latest execution plan for the machine
             cursor.execute(
-                """SELECT TOP 1 ep.Item, ep.CompletionTime 
+                """SELECT TOP 1 po.Item, po.PlannedDeliveryDateTime 
+                   FROM ExecutionPlans po 
+                   JOIN Items i ON po.Item COLLATE SQL_Latin1_General_CP1_CI_AS = i.Item 
+                   WHERE i.Process = 'ROD' AND po.Routing = ? 
+                   ORDER BY PlannedDeliveryDateTime DESC""", 
+                (machine,)
+            )
+            
+            """cursor.execute(
+                SELECT TOP 1 ep.Item, ep.CompletionTime 
                    FROM ExecutionPlans ep 
                    JOIN Items i ON ep.Item COLLATE SQL_Latin1_General_CP1_CI_AS = i.Item 
                    WHERE i.Process = 'ROD' AND ep.Machine = ? 
-                   ORDER BY CompletionTime DESC""", 
+                   ORDER BY CompletionTime DESC, 
                 (machine,)
-            )
+            )"""
             result = cursor.fetchone()
             latest_ep_item, previous_plan_CoT = result if result else (None, None)
             
@@ -342,9 +351,10 @@ class RODPandS():
 
 
 class TrefPandS():
-    def __init__(self, DataHandler):
+    def __init__(self, DataHandler, user_id=None):
         self.DataHandler = DataHandler
         self.Machines, self.TorcItems, self.TrefItems = self.DataHandler.TrefMachines, self.DataHandler.TorcItems, self.DataHandler.TrefItems
+        self.user_id = user_id
 
     def combineItems(self, combination):
         combined_weights, combined_values, weights_names, weights_PO, exec_plan_ids, type_list = [], [], [], [], [], []
@@ -373,18 +383,21 @@ class TrefPandS():
     def Planning(self):
         """Enhanced Planning with abort checks"""
         try:
-            check_abort()  # Initial check
+            if self.user_id:
+                check_abort(self.user_id)  # Initial check
             
             best_solutions = self.execPlanCombinations()
             
-            check_abort()  # Check after combinations
+            if self.user_id:
+                check_abort(self.user_id)  # Check after combinations
             
             # Process solutions with abort checks
             plans_to_exclude = []
-            for exec_plan in abortable_loop(self.DataHandler.ExecutionPlans, check_interval=50):
+            for exec_plan in abortable_loop(self.DataHandler.ExecutionPlans, self.user_id, check_interval=50):
                 exec_plan_found = False
                 for solutions in best_solutions:
-                    check_abort()  # Check during solution processing
+                    if self.user_id:
+                        check_abort(self.user_id)  # Check during solution processing
                     for solution in solutions:
                         for machine in self.Machines:
                             if machine.IsActive and (exec_plan.id in solution["allocated_exec_plans"][machine.MachineCode] or
@@ -399,19 +412,22 @@ class TrefPandS():
             for ep_id in plans_to_exclude:
                 self.DataHandler.removeEPbyID(ep_id)
 
-            check_abort()  # Check before creating time units
+                if self.user_id:
+                    check_abort(self.user_id)  # Check before creating time units
             
             # Create time units with abort checks
             for solutions in best_solutions:
-                check_abort()
+                if self.user_id:
+                    check_abort(self.user_id)
                 for _, solution in enumerate(solutions):
-                    for machine in abortable_loop(self.Machines, check_interval=10):
+                    for machine in abortable_loop(self.Machines, self.user_id, check_interval=10):
                         TUCount = 0
                         if machine.IsActive and solution["individual_weights_POs"][machine.MachineCode]:
                             timeUnit = TimeUnit(machine.MachineCode)
                             self.DataHandler.TimeUnits.append(timeUnit)
                             for exec_plan in self.DataHandler.ExecutionPlans:
-                                check_abort()  # Check during execution plan processing
+                                if self.user_id:
+                                    check_abort(self.user_id)  # Check during execution plan processing
                                 for exec_plan_id in solution["allocated_exec_plans"][machine.MachineCode]:
                                     if exec_plan.id == exec_plan_id:
                                         timeUnit.ExecutionPlans.append(exec_plan)
@@ -438,11 +454,18 @@ class TrefPandS():
                     with conn.cursor() as cursor:
                         # Query to get the ExecutionPlan with the biggest CompletionTime for the machine
                         cursor.execute("""
+                                SELECT TOP 1 po.Item
+                                FROM ProductionOrders po
+                                WHERE Routing = ?
+                                ORDER BY PlannedDeliveryDateTime DESC
+                            """, (machine,))
+                        
+                        """cursor.execute(
                                 SELECT TOP 1 ep.Item
                                 FROM ExecutionPlans ep
                                 WHERE Machine = ?
                                 ORDER BY CompletionTime DESC
-                            """, (machine,))
+                            , (machine,))"""
 
                         result = cursor.fetchone()  # Fetch the first result
                         execution_plan = result[0] if result else None
@@ -694,7 +717,7 @@ class TrefPandS():
             # Initialize prod_exec_plans as a dictionary
             prod_exec_plans = {}
 
-            for prod_order in abortable_loop(sorted_prod_orders, check_interval=10):
+            for prod_order in abortable_loop(sorted_prod_orders, self.user_id, check_interval=10):
                 # Filter execution plans by production order ID and exclude BUN process
                 filtered_plans = [ep for ep in self.DataHandler.ExecutionPlans if
                                   ep.ProductionOrder.id == prod_order.id and ep.ItemRelated.Process != "BUN"]
@@ -720,7 +743,8 @@ class TrefPandS():
 
             batch_size = 25
             for i in range(0, len(sorted_prod_orders), batch_size):
-                check_abort()
+                if self.user_id:
+                    check_abort(self.user_id)
                 
                 best_solution = None
                 best_solution_weight, best_solution_value, best_solution_size = 0, 0, 0
@@ -741,7 +765,8 @@ class TrefPandS():
 
                 # Generate combinations for the current batch
                 for combination in product(*batch_exec_plans.values()):
-                    check_abort()
+                    if self.user_id:
+                        check_abort(self.user_id)
                     
                     st = tm.time()
                     flattened_combination = list(chain.from_iterable(chain.from_iterable(combination)))
@@ -1155,11 +1180,12 @@ class TrefPandS():
         return None
 
 class TorcPandS():
-    def __init__(self, DataHandler):
+    def __init__(self, DataHandler, user_id=None):
         self.DataHandler = DataHandler
         self.Machines = [m for m in DataHandler.TorcMachines if m.IsActive]
         self.TorcItems = DataHandler.TorcItems
         self.TrefItems = DataHandler.TrefItems
+        self.user_id = user_id
         #self.SetupTimesCache, self.CycleTimesCache, self.MaterialTypeCache, self.RoutingCache = (
         #    self.cacheSetupTimes(), self.cacheCycleTimes(), self.cacheMaterialTypes(), self.cacheRoutings())
         
@@ -1246,11 +1272,11 @@ class TorcPandS():
         shift_start_times = [time(0, 0), time(8, 0), time(16, 0)]
         
         query = """
-            SELECT TOP 1 ep.Item, ep.CompletionTime 
-            FROM ExecutionPlans ep 
-            JOIN Items i ON ep.Item COLLATE SQL_Latin1_General_CP1_CI_AS = i.Item 
-            WHERE i.Process = 'BUN' AND ep.Machine = ? 
-            ORDER BY CompletionTime DESC
+            SELECT TOP 1 po.Item, po.PlannedDeliveryDateTime 
+            FROM ProductionOrders po 
+            JOIN Items i ON po.Item COLLATE SQL_Latin1_General_CP1_CI_AS = i.Item 
+            WHERE i.Process = 'BUN' AND po.Routing = ? 
+            ORDER BY PlannedDeliveryDateTime DESC
         """
         
         with pyodbc.connect(self.DataHandler.ConnectionString) as conn:
@@ -1503,11 +1529,17 @@ class TorcPandS():
                 
                 data[2], data[3] = ST, CoT
                 previous_item_CoT, previous_type = CoT, current_type
-                
+            
         return initial_solution, operations
 
     def objFun(self, solution, updated_machines=None):
         """Calculate the objective function value for the given solution. Objective - Minimize tardiness and penalize alternations."""
+        
+        # Initialize weights
+        weights = {
+            'tardiness': 0.0,
+            'early_completion': 0.0
+        }
 
         def calculate_machine_objfun(machine, operations):
             if not operations:
@@ -1515,6 +1547,7 @@ class TorcPandS():
                 
             tardiness_value = 0
             early_completion_value = 0
+            alternation_penalty = 0
             used_eps = []
             tref_item_CoT = {}
             
@@ -1537,18 +1570,26 @@ class TorcPandS():
                 Tardiness = max(CoT - data[1].ProductionOrder.DD, timedelta(0))
                 tardiness_minutes = Tardiness.total_seconds() / 60
                 tardiness_value += tardiness_minutes
-
+                
                 # Alternation penalty
                 if last_item_name and last_item_name != current_item_name:
 
                     # Dynamic penalty based on current tardiness
-                    penalty_weight = min(0.5, tardiness_minutes / 1000) if tardiness_minutes > 0 else 0.1
-                    tardiness_value += 4000 * penalty_weight
+                    base_penalty = 500  # Static penalty for any alternation
+                    tardiness_bonus = min(300, tardiness_minutes / 10) if tardiness_minutes > 0 else 0
+                    alternation_penalty = base_penalty + tardiness_bonus
+                    tardiness_value += alternation_penalty
+                    #alternation_penalty *= 5000
 
                 # Early Completion Reward
                 early_time = (data[1].ProductionOrder.DD - CoT).total_seconds() / 60
                 if early_time > 0:
                     early_completion_value += early_time
+                    
+                #print("Tardiness", tardiness_value)
+                #print("Early completion", early_completion_value)
+                #print("Load balancing", alternation_penalty)
+                #print()
 
                 # Update state
                 data[2], data[3] = ST, CoT
@@ -1558,33 +1599,38 @@ class TorcPandS():
             return tardiness_value, early_completion_value
 
         if updated_machines is None:
-            total_tardiness_value = 0
-            total_early_completion_value = 0
+            #total_tardiness_value = 0
+            #total_early_completion_value = 0
+            #total_alternation_penalty = 0
             
             for machine, operations in solution.items():
-                tardiness, early = calculate_machine_objfun(machine, operations)
-                self.MachineObjFun[machine] = (tardiness, early)
-                total_tardiness_value += tardiness
-                total_early_completion_value += early
+                tardiness, early_completion = calculate_machine_objfun(machine, operations)
+                self.MachineObjFun[machine] = (tardiness, early_completion)
+                weights['tardiness'] += tardiness
+                weights['early_completion'] += early_completion    
+                #total_tardiness_value += tardiness
+                #total_early_completion_value += early_completion    
                 
-            return total_tardiness_value, total_early_completion_value, None
+            return weights, None
 
         machineObjFunValue = self.MachineObjFun.copy()
 
-        total_tardiness_value = sum(
+        weights["tardiness"] = sum(
             machineObjFunValue[machine][0] for machine in machineObjFunValue if machine not in updated_machines
         )
-        total_early_completion_value = sum(
+        weights['early_completion'] = sum(
             machineObjFunValue[machine][1] for machine in machineObjFunValue if machine not in updated_machines
         )
-
+        
         for machine in updated_machines:
             tardiness, early_completion = calculate_machine_objfun(machine, solution[machine])
             machineObjFunValue[machine] = (tardiness, early_completion)
-            total_tardiness_value += tardiness
-            total_early_completion_value += early_completion
+            weights['tardiness'] += tardiness
+            weights['early_completion'] += early_completion    
+            #total_tardiness_value += tardiness
+            #total_early_completion_value += early_completion
 
-        return total_tardiness_value, total_early_completion_value, machineObjFunValue
+        return weights, machineObjFunValue
 
     def machineMove(self, solution, op1, op2):
         '''Takes a solution dictionary, machine, and two operations op1, op2.
@@ -1651,18 +1697,19 @@ class TorcPandS():
     def simulatedAnnealing(self):
         '''Simulated Annealing algorithm implementation for optimizing the scheduling problem.'''
         # Parameters
-        initial_temp = 500 * len(self.Operations)
+        initial_temp = 1000 * len(self.Operations)
         final_temp = 0.01
-        max_iter_per_temp = 100
-        alpha = 0.99
+        max_iter_per_temp = 200
+        alpha = 0.95
 
         # Initial solution and its objective value
         current_solution = self.InitialSolution
-        current_tardiness, best_early_completion, _ = self.objFun(current_solution)
+        current_weights, _ = self.objFun(current_solution)
         
         best_solution = copy.deepcopy(current_solution)
+        current_tardiness = current_weights['tardiness']
         best_tardiness = current_tardiness
-
+        
         temperature = initial_temp
         iter_total = no_improvement_iterations = 0
         attempted_moves = set()  # Track moves that don't improve the solution
@@ -1672,6 +1719,9 @@ class TorcPandS():
             for _ in range(max_iter_per_temp):
                 iter_total += 1
                 
+                if self.user_id:
+                    check_abort(self.user_id)
+                
                 # Generate candidate move
                 candidate_solution, updated_machines = self.generateMove(
                     current_solution, iter_total, attempted_moves
@@ -1680,25 +1730,25 @@ class TorcPandS():
                 if not updated_machines:
                     continue
 
-                candidate_tardiness, candidate_early_completion, candidate_obj  = self.objFun(
+                candidate_weights, candidate_obj  = self.objFun(
                     candidate_solution, updated_machines)
 
                 # Calculate the change in objective value 
-                delta_tardiness = candidate_tardiness - current_tardiness
+                delta_tardiness = candidate_weights["tardiness"] - current_tardiness
 
                 # Acceptance condition: if candidate solution is better, accept it
                 if delta_tardiness < 0:
                     current_solution = candidate_solution
-                    current_tardiness = candidate_tardiness
+                    current_tardiness = candidate_weights["tardiness"]
                     self.MachineObjFun = candidate_obj 
                     
                     # Update the best solution found so far
-                    if candidate_tardiness < best_tardiness or (
-                            candidate_tardiness == best_tardiness and candidate_early_completion > best_early_completion
+                    if candidate_weights["tardiness"] < best_tardiness or (
+                            candidate_weights["tardiness"] == best_tardiness and candidate_weights["early_completion"] > best_early_completion
                     ):
                         best_solution = candidate_solution
-                        best_tardiness = candidate_tardiness
-                        best_early_completion = candidate_early_completion
+                        best_tardiness = candidate_weights["tardiness"]
+                        best_early_completion = candidate_weights["early_completion"]
                         no_improvement_iterations = 0  # Reset counter
                         attempted_moves.clear()  # Reset attempted moves on improvement
                         #print(
@@ -1708,7 +1758,7 @@ class TorcPandS():
                     probability = math.exp(-delta_tardiness / temperature)
                     if random.random() < probability:
                         current_solution = candidate_solution
-                        current_tardiness = candidate_tardiness
+                        current_tardiness = candidate_weights["tardiness"]
                         self.MachineObjFun = candidate_obj 
                         no_improvement_iterations += 1
                         #print(f"Iter {iter_total}: Worse solution accepted with objValue {current_tardiness}")

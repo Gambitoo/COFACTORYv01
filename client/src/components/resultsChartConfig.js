@@ -2,11 +2,13 @@ import { ref, reactive } from 'vue';
 import axios from 'axios';
 import { startOfWeek, endOfWeek } from 'date-fns';
 
-const apiUrl = `${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`;
+const apiUrl = `http://${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`;
 
-export const machines = ref([]);
-const exec_plans = ref([]);
+const machines = ref([]);
+//const exec_plans = ref([]);
 const new_exec_plans = ref([]);
+const production_orders = ref([]);
+
 export const data = reactive({
   datasets: [],
 });
@@ -139,9 +141,10 @@ export const getData = async (planoId) => {
       headers: { 'Content-Type': 'application/json' },
       withCredentials: true
     });
-    exec_plans.value = res.data.exec_plans;
+    //exec_plans.value = res.data.exec_plans;
     new_exec_plans.value = res.data.new_exec_plans;
     machines.value = res.data.machines;
+    production_orders.value = res.data.production_orders;
 
     machines.value.sort((a, b) => {
       const getTypeOrder = (type) => {
@@ -190,7 +193,7 @@ export const getData = async (planoId) => {
     let minST = Infinity; // Track the earliest start time
     let maxCoT = -Infinity; // Track the latest completion time
 
-    exec_plans.value.forEach((plan) => {
+    /*exec_plans.value.forEach((plan) => {
       const startTime = new Date(plan.ST).getTime();
       const completionTime = new Date(plan.CoT).getTime();
 
@@ -211,6 +214,34 @@ export const getData = async (planoId) => {
       };
       dt.data.push(data);
 
+      // Override the color to a greyish shade
+      const greyColor = "#B0BEC5"; // Light grey (you can adjust this)
+      const greyBorderColor = "#78909C"; // Darker grey for the border
+
+      dt.backgroundColor.push(greyColor);
+      dt.borderColor.push(greyBorderColor);
+    });*/
+
+    production_orders.value.forEach((plan) => {
+      const startTime = new Date(plan.ST).getTime();
+      const completionTime = new Date(plan.CoT).getTime();
+    
+      // Update min and max
+      if (startTime < minST) minST = startTime;
+      if (completionTime > maxCoT) maxCoT = completionTime;
+    
+      let data = {
+        x: [
+          new Date(plan.ST).toISOString(), // Ensure valid ISO string
+          new Date(plan.CoT).toISOString(),
+        ],
+        y: plan.machine,
+        name: plan.item,
+        quantity: plan.quantity,
+        orderInc: plan.orderIncrement,
+      };
+      dt.data.push(data);
+    
       // Override the color to a greyish shade
       const greyColor = "#B0BEC5"; // Light grey (you can adjust this)
       const greyBorderColor = "#78909C"; // Darker grey for the border

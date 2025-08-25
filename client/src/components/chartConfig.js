@@ -4,8 +4,10 @@ import { startOfWeek, endOfWeek } from 'date-fns';
 
 const apiUrl = `http://${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`;
 
-export const machines = ref([]);
+const machines = ref([]);
 const exec_plans = ref([]);
+const production_orders = ref([]);
+
 export const data = reactive({
   datasets: [],
 });
@@ -135,8 +137,9 @@ export const getData = async () => {
   const path = `${apiUrl}/getChartData`;
   try {
     const res = await axios.get(path, { withCredentials: true });
-    exec_plans.value = res.data.exec_plans;
+    //exec_plans.value = res.data.exec_plans;
     machines.value = res.data.machines;
+    production_orders.value = res.data.production_orders;
 
     machines.value.sort((a, b) => {
       const getTypeOrder = (type) => {
@@ -165,7 +168,9 @@ export const getData = async () => {
     data.datasets.splice(0, data.datasets.length); // Clear existing data
 
     // Create a better item to color mapping
-    const uniqueItems = [...new Set(exec_plans.value.map(plan => plan.itemRelated))];
+    //const uniqueItems = [...new Set(exec_plans.value.map(plan => plan.itemRelated))];
+
+    const uniqueItems = [...new Set(production_orders.value.map(plan => plan.item))];
     const colorMap = new Map();
 
     // Pre-generate colors for all unique items
@@ -185,7 +190,7 @@ export const getData = async () => {
     let minST = Infinity; // Track the earliest start time
     let maxCoT = -Infinity; // Track the latest completion time
 
-    exec_plans.value.forEach((plan) => {
+    /*exec_plans.value.forEach((plan) => {
       const startTime = new Date(plan.ST).getTime();
       const completionTime = new Date(plan.CoT).getTime();
 
@@ -207,6 +212,32 @@ export const getData = async () => {
       dt.data.push(data);
 
       const color = colorMap.get(plan.itemRelated) || generateDistinctColor(dt.data.length);
+      dt.backgroundColor.push(color);
+      dt.borderColor.push(generateBorderColor(color));
+    });
+    data.datasets.push(dt);*/
+
+    production_orders.value.forEach((plan) => {
+      const startTime = new Date(plan.ST).getTime();
+      const completionTime = new Date(plan.CoT).getTime();
+
+      // Update min and max
+      if (startTime < minST) minST = startTime;
+      if (completionTime > maxCoT) maxCoT = completionTime;
+
+      let data = {
+        x: [
+          new Date(plan.ST).toISOString(), // Ensure valid ISO string
+          new Date(plan.CoT).toISOString(),
+        ],
+        y: plan.machine,
+        name: plan.item,
+        quantity: plan.quantity,
+        orderInc: plan.orderIncrement,
+      };
+      dt.data.push(data);
+
+      const color = colorMap.get(plan.item) || generateDistinctColor(dt.data.length);
       dt.backgroundColor.push(color);
       dt.borderColor.push(generateBorderColor(color));
     });
