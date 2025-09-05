@@ -1,0 +1,3 @@
+Organizar por Melhor Cycle Time, 
+Sequenciamento por Diâmetro, 
+Menor Número de Mudanças

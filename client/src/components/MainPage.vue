@@ -31,7 +31,6 @@
                     </ul>
                 </div>
             </div>
-            <!--<button @click="createNewPlan" class="create-plan-btn">Criar Novo Plano</button>-->
         </header>
 
         <div v-if="isAlgorithmRunning" class="loading-tooltip">
@@ -69,10 +68,6 @@
             @close="closeLateOrdersModal" />
 
     </div>
-
-    <!--<div v-if="showBranchModal" class="modal-overlay">
-        <BranchSelectionModal @confirm="handleBranchSelection" />
-    </div>-->
 </template>
 
 <script lang="ts">
@@ -82,7 +77,6 @@ import RemoveMachinesModal from "@/components/RemoveMachinesModal.vue";
 import RemoveBoMsModal from "@/components/RemoveBoMsModal.vue";
 import ResultsModal from "@/components/ResultsModal.vue";
 import MissingItemsModal from "@/components/MissingItemsModal.vue";
-//import BranchSelectionModal from "@/components/BranchSelectionModal.vue";
 import PlanHistoryPage from "@/components/PlanHistoryPage.vue";
 import LateOrdersModal from "@/components/LateOrdersModal.vue";
 
@@ -118,25 +112,25 @@ export default {
             apiUrl: `http://${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`,
         };
     },
-    mounted() {
-        //window.addEventListener("beforeunload", this.handlePageUnload);
+    async mounted() {
+        await this.checkUrlParameters();
+
+        // Add event listener to check for algorithm status
         window.addEventListener("statuscheck", this.pollAlgorithmStatus);
         document.addEventListener('click', this.handleClickOutside);
         //window.addEventListener("admincheck", this.checkAdminPriviliges);
-        this.checkUrlParameters();
 
         // Add resize listener to adjust content height
         window.addEventListener('resize', this.updateContentHeight);
         this.updateContentHeight();
 
+        this.checkAdminPrivileges();
         this.pollAlgorithmStatus();
-        this.checkAdminPriviliges();
     },
     beforeDestroy() {
-        //window.removeEventListener("beforeunload", this.handlePageUnload);
         window.removeEventListener("statuscheck", this.pollAlgorithmStatus);
         document.removeEventListener('click', this.handleClickOutside);
-        window.removeEventListener("admincheck", this.checkAdminPriviliges);
+        window.removeEventListener("admincheck", this.checkAdminPrivileges);
         window.removeEventListener('resize', this.updateContentHeight);
     },
     methods: {
@@ -160,7 +154,7 @@ export default {
             }
         },
         // Check and get URL parameters
-        checkUrlParameters() {
+        async checkUrlParameters() {
             // Get URL search parameters
             const urlParams = new URLSearchParams(window.location.search);
 
@@ -178,9 +172,10 @@ export default {
                 }
 
                 this.currentBranch = dbBranch;
-                this.selectBranchWithParams(dbBranch, userId);
+                await this.selectBranchWithParams(dbBranch, userId);
             } else {
-                console.error("Branch ou userId missing in URL parameters.");
+                alert("Erro: Parâmetros em falta no URL");
+                console.error("[checkUrlParameters] Error: Branch or User ID missing from the URL parameters.");
             }
 
         },
@@ -201,16 +196,13 @@ export default {
                     credentials: 'include',
                     headers: { "Content-Type": "application/json" },
                 });
-
-                if (response.ok) {
-                    const data = await response.json();
-                    this.activeUsers = data.active_users || [];
-                } else {
-                    console.error(`Erro na obtenção dos utilizadores ativos: ${response.status} ${response.statusText}`);
-                    this.activeUsers = [];
-                }
+                
+                const data = await this.handleResponse(response, "activeAlgorithms");
+                this.activeUsers = data.active_users || [];
+                
             } catch (error) {
-                console.error("[activeAlgorithms] Erro na obtenção dos utilizadores ativos:", error);
+                alert(error.message);
+                console.error("[activeAlgorithms] Error:", error.message);
                 this.activeUsers = [];
             }
         },
@@ -227,96 +219,92 @@ export default {
         },
         async selectBranchWithParams(branch, userId) {
             try {
-                const response = await fetch(`${this.apiUrl}/selectBranch?user_id=${this.userID}`, {
+                const response = await fetch(`${this.apiUrl}/selectBranch?user_id=${userId}`, {
                     method: 'POST',
                     credentials: 'include',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ branch, userId }),
                 });
+            
+                await this.handleResponse(response, "selectBranch");
 
-                const data = await response.json();
-                if (response.ok) {
-                    this.userID = userId;
-                    this.showBranchModal = false;
-                    this.showGanttChart = true;
-                    this.$nextTick(() => this.updateContentHeight());
-                } else {
-                    alert(data.message);
-                }
+                this.userID = userId;
+                this.showBranchModal = false;
+                this.showGanttChart = true;
+                this.$nextTick(() => this.updateContentHeight());
+            
             } catch (error) {
-                console.error("[selectBranch] Erro no selecionamento da unidade de produção:", error);
+                alert(error.message || "Erro no selecionamento da unidade de produção. Por favor tente novamente.");
+                console.error("[selectBranch] Error:", error.message);
             }
         },
         async createNewPlan() {
             this.menuOpen = false;
-            const openFilePicker = async () => {
-                if (!window.showOpenFilePicker) {
-                    return new Promise((resolve) => {
-                        const input = document.createElement("input");
-                        input.type = "file";
-                        input.accept = ".xlsx";
-                        input.onchange = (event) => {
-                            const file = event.target.files[0];
-                            resolve(file);
-                        };
-                        input.click();
-                    });
-                }
-
-                try {
-                    const [fileHandle] = await window.showOpenFilePicker({
-                        types: [
-                            {
-                                description: "Excel Files",
-                                accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] },
-                            },
-                        ],
-                        multiple: false,
-                    });
-                    return await fileHandle.getFile();
-                } catch (error) {
-                    console.error("Erro na seleção do ficheiro:", error);
-                    return null;
-                }
-            };
 
             try {
-                const file = await openFilePicker();
+                const file = await this.openFilePicker();
                 if (!file) {
                     alert("Nenhum ficheiro selecionado.");
                     return;
                 }
-
+            
                 this.selectedFile = file;
-
+            
                 const formData = new FormData();
                 formData.append("file", file);
-
+            
                 const response = await fetch(`${this.apiUrl}/uploadInputFile?user_id=${this.userID}`, {
                     method: "POST",
                     credentials: 'include',
                     body: formData,
-                })
+                });
+            
+                await this.handleResponse(response, "uploadInputFile");
 
-                const result = await response.json();
-                if (response.ok) {
-                    this.criteriaModal({
-                        title: "Critérios",
-                        criteria: this.criteria,
-                    });
-                } else {
-                    alert(result.message);
-                }
-
+                this.criteriaModal({
+                    title: "Critérios",
+                    criteria: this.criteria,
+                });
+            
             } catch (error) {
-                console.error("[uploadInputFile] Erro no upload do ficheiro de input:", error);
-                alert("Ocorreu um erro. Por favor tente novamente.");
+                console.error("[uploadInputFile] Error:", error.message);
+                alert(error.message || "Ocorreu um erro no upload do ficheiro. Por favor tente novamente.");
+            }
+        },
+        async openFilePicker() {
+            if (!window.showOpenFilePicker) {
+                return new Promise((resolve) => {
+                    const input = document.createElement("input");
+                    input.type = "file";
+                    input.accept = ".xlsx";
+                    input.onchange = (event) => {
+                        const file = event.target.files[0];
+                        resolve(file);
+                    };
+                    input.click();
+                });
+            }
+        
+            try {
+                const [fileHandle] = await window.showOpenFilePicker({
+                    types: [
+                        {
+                            description: "Excel Files",
+                            accept: { "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"] },
+                        },
+                    ],
+                    multiple: false,
+                });
+                return await fileHandle.getFile();
+            } catch (error) {
+                console.error("[openFilePicker] Error:", error.message);
+                return null; 
             }
         },
         async handleModalConfirm(selectedCriteria) {
             console.log("Critérios:", selectedCriteria);
             this.criteriaSelected = true;
-
+        
             try {
                 const response = await fetch(`${this.apiUrl}/criteria?user_id=${this.userID}`, {
                     method: "POST",
@@ -325,29 +313,34 @@ export default {
                         "Content-Type": "application/json",
                     },
                     body: JSON.stringify({ selectedCriteria, allCriteria: this.criteria }),
-                })
+                });
+            
+                await this.handleResponse(response, "criteria");
 
-                if (!response.ok) {
-                    alert("Erro no processamento dos critérios. Por favor tente novamente.")
+                // Success - continue with workflow
+                this.showCriteriaModal = false;
+            
+                if (selectedCriteria[0]) {
+                    await this.fetchMachines();
+                    this.showRemoveMachinesModal = true;
                 }
+            
+                if (selectedCriteria[5] && !this.showRemoveMachinesModal) {
+                    await this.fetchBoMs();
+                    this.showRemoveBoMsModal = true;
+                }
+            
+                this.selectedCriteria = selectedCriteria;
+                this.checkIfReadyToFinalize();
+            
             } catch (error) {
-                console.error("[criteria] Erro no processamento dos critérios:", error);
+                console.error("[criteria] Error:", error.message);
+                alert(error.message || "Erro no processamento dos critérios. Por favor tente novamente.");
+
+                // Reset state on error
+                this.criteriaSelected = false;
+                this.showCriteriaModal = false;
             }
-
-            this.showCriteriaModal = false;
-
-            if (selectedCriteria[0]) {
-                await this.fetchMachines();
-                this.showRemoveMachinesModal = true;
-            }
-
-            if (selectedCriteria[5] && !this.showRemoveMachinesModal) {
-                await this.fetchBoMs();
-                this.showRemoveBoMsModal = true;
-            }
-
-            this.selectedCriteria = selectedCriteria;
-            this.checkIfReadyToFinalize();
         },
         closeCriteriaModal() {
             this.deleteFileRequest();
@@ -359,18 +352,18 @@ export default {
                     method: 'GET',
                     credentials: 'include',
                 });
-                const data = await response.json();
-                if (response.ok) {
-                    if (!this.branchMachines[this.currentBranch]) {
-                        this.branchMachines[this.currentBranch] = {};
-                    }
-                    this.branchMachines[this.currentBranch].machines = data.machines.map(machine => machine.name);
-                    this.branchMachines[this.currentBranch].processes = data.processes;
-                } else {
-                    alert("Erro ao solicitação das máquinas. Por favor tente novamente.");
+            
+                const data = await this.handleResponse(response, "machines");
+
+                if (!this.branchMachines[this.currentBranch]) {
+                    this.branchMachines[this.currentBranch] = {};
                 }
+                this.branchMachines[this.currentBranch].machines = data.machines.map(machine => machine.name);
+                this.branchMachines[this.currentBranch].processes = data.processes;
+            
             } catch (error) {
-                console.log("[machines] Erro na solicitação das máquinas:", error);
+                console.error("[machines] Error:", error.message);
+                alert(error.message || "Erro na solicitação das máquinas. Por favor tente novamente.");
             }
         },
         async fetchBoMs() {
@@ -379,136 +372,165 @@ export default {
                     method: 'GET',
                     credentials: 'include',
                 });
-                const data = await response.json();
-                if (response.ok) {
-                    this.branchBoMs[this.currentBranch] = data.item_BoMs;
-                } else {
-                    alert("Erro na solicitação das BOM's. Por favor tente novamente.");
-                }
+            
+                const data = await this.handleResponse(response, "BoMs");
+
+                this.branchBoMs[this.currentBranch] = data.item_BoMs;
+            
             } catch (error) {
-                console.log("[BoMs] Erro na obtenção das BOM's:", error);
+                console.error("[BoMs] Error:", error.message);
+                alert(error.message || "Erro na solicitação das BOMs. Por favor tente novamente.");
             }
         },
-        handleRemoveMachinesConfirm(selectedMachines) {
+        async handleRemoveMachinesConfirm(selectedMachines) {
             console.log("Máquinas selecionadas para remoção:", selectedMachines);
             this.showRemoveMachinesModal = false;
             this.machinesRemoved = true;
-
-            fetch(`${this.apiUrl}/removeMachines?user_id=${this.userID}`, {
-                method: "POST",
-                credentials: 'include',
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(selectedMachines),
-            })
-                .then((response) => response.json())
-                .then(() => {
-                    if (this.selectedCriteria[5]) {
-                        this.fetchBoMs();
-                        this.showRemoveBoMsModal = true;
-                    } else {
-                        this.checkIfReadyToFinalize();
-                    }
-                })
-                .catch((error) => {
-                    console.error("Erro na solicitação de remoção:", error);
+        
+            try {
+                const response = await fetch(`${this.apiUrl}/removeMachines?user_id=${this.userID}`, {
+                    method: "POST",
+                    credentials: 'include',
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(selectedMachines),
                 });
+            
+                await this.handleResponse(response, "removeMachines");
+
+                if (this.selectedCriteria[5]) {
+                    await this.fetchBoMs();
+                    this.showRemoveBoMsModal = true;
+                } else {
+                    this.checkIfReadyToFinalize();
+                }
+            
+            } catch (error) {
+                console.error("[removeMachines] Error:", error.message);
+                alert(error.message || "Erro na remoção das máquinas. Por favor tente novamente.");
+
+                this.showRemoveMachinesModal = true;
+                this.machinesRemoved = false;
+            }
         },
         closeRemoveMachinesModal() {
             this.deleteFileRequest();
             this.showRemoveMachinesModal = false;
         },
-        handleRemoveBoMsConfirm(selectedBoMs) {
-            console.log("BOM's selecionadas para remoção:", selectedBoMs);
+        async handleRemoveBoMsConfirm(selectedBoMs) {
+            console.log("BOMs selecionadas para remoção:", selectedBoMs);
             this.showRemoveBoMsModal = false;
             this.bomsRemoved = true;
-
-            fetch(`${this.apiUrl}/removeBoMs?user_id=${this.userID}`, {
-                method: "POST",
-                credentials: 'include',
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(selectedBoMs),
-            })
-                .then((response) => response.json())
-                .then(() => this.checkIfReadyToFinalize())
-                .catch((error) => {
-                    console.error("Erro na solicitação de remoção:", error);
+        
+            try {
+                const response = await fetch(`${this.apiUrl}/removeBoMs?user_id=${this.userID}`, {
+                    method: "POST",
+                    credentials: 'include',
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(selectedBoMs),
                 });
+            
+                await this.handleResponse(response, "removeBoMs");
+
+                this.checkIfReadyToFinalize();
+            
+            } catch (error) {
+                console.error("[removeBoMs] Error:", error.message);
+                alert(error.message || "Erro na remoção das BOMs. Por favor tente novamente.");
+
+                this.showRemoveBoMsModal = true;
+                this.bomsRemoved = false;
+            }
         },
         closeRemoveBoMsModal() {
             this.deleteFileRequest();
             this.showRemoveBoMsModal = false;
         },
-        checkIfReadyToFinalize() {
+        async checkIfReadyToFinalize() {
             const isReady =
                 this.criteriaSelected &&
                 (!this.selectedCriteria[0] || this.machinesRemoved) &&
                 (!this.selectedCriteria[5] || this.bomsRemoved);
-
-            if (isReady) {
-                fetch(`${this.apiUrl}/createData?user_id=${this.userID}`, {
+        
+            if (!isReady) return;
+        
+            try {
+                // Create data and check for missing items
+                const createResponse = await fetch(`${this.apiUrl}/createData?user_id=${this.userID}`, {
                     method: 'POST',
                     credentials: 'include',
-                })
-                    .then(response => response.json())
-                    .then((data) => {
-                        if (!this.missingItemsData[this.userID]) {
-                            this.missingItemsData[this.userID] = {
-                                noRoutings: [],
-                                noBoms: [],
-                                shouldShow: false
-                            };
-                        }
-                        
-                        // Update the user's missing items
-                        if (data.no_routings && data.no_routings.length > 0) {
-                            this.missingItemsData[this.userID].noRoutings = data.no_routings;
-                        }
+                });
+            
+                const data = this.handleResponse(createResponse, "createData");
+           
+                // Initialize missing items data
+                if (!this.missingItemsData[this.userID]) {
+                    this.missingItemsData[this.userID] = {
+                        noRoutings: [],
+                        noBoms: [],
+                        shouldShow: false
+                    };
+                }
+            
+                // Update missing items
+                if (data.no_routings?.length > 0) {
+                    this.missingItemsData[this.userID].noRoutings = data.no_routings;
+                }
+            
+                if (data.no_bom?.length > 0) {
+                    this.missingItemsData[this.userID].noBoms = data.no_bom;
+                }
+            
+                // Show modal if there are missing items
+                if (this.missingItemsData[this.userID].noRoutings.length > 0 ||
+                    this.missingItemsData[this.userID].noBoms.length > 0) {
+                    this.missingItemsData[this.userID].shouldShow = true;
+                }
+            
+                // Start algorithm
+                this.isAlgorithmRunning = true;
+            
+                const algorithmResponse = await fetch(`${this.apiUrl}/runAlgorithm?user_id=${this.userID}`, {
+                    method: 'POST',
+                    credentials: 'include',
+                });
+            
+                await this.handleResponse(algorithmResponse, "runAlgorithm");
+            
+                // Start polling for status
+                this.pollAlgorithmStatus();
+            
+            } catch (error) {
+                console.error("[checkIfReadyToFinalize] Error:", error.message);
 
-                        if (data.no_bom && data.no_bom.length > 0) {
-                            this.missingItemsData[this.userID].noBoms = data.no_bom;
-                        }
+                this.isAlgorithmRunning = false;
 
-                        // Set flag to show modal for this user
-                        if (this.missingItemsData[this.userID].noRoutings.length > 0 ||
-                            this.missingItemsData[this.userID].noBoms.length > 0) {
-                            this.missingItemsData[this.userID].shouldShow = true;
-                        }
-
-                        this.isAlgorithmRunning = true;
-                        fetch(`${this.apiUrl}/runAlgorithm?user_id=${this.userID}`, {
-                            method: 'POST',
-                            credentials: 'include',
-                        })
-                            .then(response => response.json())
-                            .then(() => {
-                                // Start polling for status
-                                this.pollAlgorithmStatus();
-                            })
-                            .catch((error) => {
-                                console.error("Erro na execução do algoritmo:", error);
-                                if (error && error.message) {
-                                    alert(error.message);
-                                } else {
-                                    alert("Ocorreu um erro na execução do algoritmo.");
-                                }
-
-                                this.isAlgorithmRunning = false;
-                            });
-                    })
-                    .catch((error) => {
-                        console.error("Erro na obtenção dos itens não existentes:", error);
-                    });
+                alert(error.message || "Ocorreu um erro inesperado. Por favor tente novamente.");
             }
         },
         pollAlgorithmStatus() {
-            const checkStatus = () => {
-                // UserID in URL to make sure it's always available
-                fetch(`${this.apiUrl}/algorithmStatus?user_id=${this.userID}`, {
-                    credentials: 'include',
-                })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.status === 'completed') {
+            if (!this.userID) {
+                console.warn("[pollAlgorithmStatus] Cannot poll algorithm status: userID not available.");
+                return;
+            }    
+
+            let consecutiveErrors = 0;
+            const maxConsecutiveErrors = 3;
+
+            const checkStatus = async () => {
+                try {
+                    const response = await fetch(`${this.apiUrl}/algorithmStatus?user_id=${this.userID}`, {
+                        credentials: 'include',
+                    });
+
+                    consecutiveErrors = 0;
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+
+                    const data = await response.json();
+                    switch(data.status) {
+                        case 'completed':
                             this.isAlgorithmRunning = false;
                             if (!this.lateOrders[this.userID]) {
                                 this.lateOrders[this.userID] = {
@@ -516,36 +538,46 @@ export default {
                                     shouldShow: true
                                 };
                             }
-
-                            //this.showResultsModal = true;
-                            //this.handleResultsConfirm();
-                        } else if (data.status === 'error') {
+                            break;
+                        case 'error':
                             this.isAlgorithmRunning = false;
-                            console.error("Algoritmo falhou:", data.message);
-                            alert("Ocorreu um erro na execução do algoritmo. Por favor tente novamente.");
-                        } else if (data.status === 'aborted') {
+                            console.error("[algorithmStatus] Error:", data.message);
+                            alert(data.message || "Erro na execução do algoritmo.");
+                            break;
+                        case 'aborted':
                             this.isAlgorithmRunning = false;
-                            console.log("Algoritmo abortado:", data.message);
-                            alert("Algoritmo abortado.");
-                        } else if (data.status === 'not_running') {
-                            // Algorithm is no longer running
+                            console.error("[algorithmStatus] Error:", data.message);
+                            alert(data.message || "Algoritmo foi abortado.");
+                            break;
+                        case 'not_running':
                             this.isAlgorithmRunning = false;
-                        } else if (data.status === 'running') {
+                            break;
+                        case 'running':
+                            // Still running, check again in 2 seconds
+                            setTimeout(checkStatus, 2000);
+                            break;
+                        default:
+                            // Still running, check again in 2 seconds
                             this.isAlgorithmRunning = true;
-                            // Still running, check again in 2 seconds
                             setTimeout(checkStatus, 2000);
-                        } else {
-                            // Still running, check again in 2 seconds
-                            setTimeout(checkStatus, 2000);
-                        }
-                    })
-                    .catch(error => {
-                        console.error("Erro na verificação do estado do algoritmo:", error);
-                        if (this.isAlgorithmRunning) {
-                            setTimeout(checkStatus, 5000); // Retry with longer delay
-                            alert("Ocorreu um erro na execução do algoritmo. Por favor tente novamente.");
-                        }
-                    });
+                            break;
+                    }
+                } catch (error) {
+                    console.error("[algorithmStatus] Error:", data.message);
+    
+                    if (consecutiveErrors >= maxConsecutiveErrors) {
+                        // Stop polling after too many consecutive errors
+                        this.isAlgorithmRunning = false;
+                        alert(error.message || "Não foi possível verificar o estado do algoritmo. Por favor atualize a página.");
+                        return;
+                    }
+
+                    if (this.isAlgorithmRunning) {
+                        // Longer delays after errors
+                        const delay = Math.min(5000 * Math.pow(2, consecutiveErrors - 1), 30000);
+                        setTimeout(checkStatus, delay);
+                    }
+                }
             };
 
             // Start checking
@@ -563,43 +595,40 @@ export default {
                 delete this.lateOrders[this.userID];
             }
         },
-        handleResultsConfirm() {
+        async handleResultsConfirm() {
             this.showResultsModal = false;
-            fetch(`${this.apiUrl}/savePlan?user_id=${this.userID}`, {
-                method: 'POST',
-                credentials: 'include',
-            })
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error("Falha no download dos ficheiros.");
-                    }
-                    return response.blob();
-                })
-                .then(blob => {
-                    const URL = window.URL.createObjectURL(blob);
-
-                    // Create and configure the anchor element
-                    const a = document.createElement('a');
-                    a.style.display = 'none';
-                    a.href = URL;
-                    a.download = 'OUTPUT_Plans.zip'; // File name
-
-                    // Append, click, and cleanup
-                    document.body.appendChild(a);
-                    a.click();
-                    setTimeout(() => {
-                        document.body.removeChild(a);
-                        window.URL.revokeObjectURL(URL);
-                    }, 100);
-                })
-                .then((data) => {
-                    console.log("Resultados guardados com sucesso:", data);
-                    this.refreshGanttChart();
-                })
-                .catch((error) => {
-                    console.error("Erro no armazenamento dos resultados:", error);
-                    alert("Erro ao guardar o plano gerado. Por favor tente novamente.")
+            try {
+                const response = await fetch(`${this.apiUrl}/savePlan?user_id=${this.userID}`, {
+                    method: 'POST',
+                    credentials: 'include',
                 });
+            
+                const fileResponse = await this.handleResponse(response, "savePlan");
+            
+                const blob = await fileResponse.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+
+                a.style.display = 'none';
+                a.href = url;
+                a.download = filename;
+
+                document.body.appendChild(a);
+                a.click();
+
+                // Cleanup
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                }, 100);
+
+                console.log("[savePlan] Results successfully saved.");
+                this.refreshGanttChart();
+            
+            } catch (error) {
+                console.error("[savePlan] Error:", error);
+                alert(error.message || "Erro ao guardar o plano gerado. Por favor tente novamente.");
+            }
         },
         closeResultsModal() {
             this.deleteFileRequest();
@@ -636,9 +665,23 @@ export default {
                     const data = new Blob([], { type: 'text/plain' });
                     navigator.sendBeacon(url, data);
                 } catch (error) {
-                    console.error("Erro no envio do sinal de termino do algoritmo:", error);
+                    console.error("[abortAlgorithm] Error:", error.message);
+
+                    // Fallback request
+                    this.fallbackAbortRequest();
                 }
             }
+        },
+        fallbackAbortRequest() {
+            fetch(`${this.apiUrl}/abortAlgorithm`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user_id: this.userID }),
+                keepalive: true 
+            }).catch(error => {
+                console.error("[abortAlgorithm] Fallback error:", error.message);
+            });
         },
         async abortUserAlgorithm(userId) {
             try {
@@ -648,22 +691,29 @@ export default {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ user_id: userId }),
                 });
-                
-                if (response.ok) {
-                    alert(`Algoritmo do utilizador ${userId} foi terminado.`);
-                    // Refresh the active users list
-                    this.getActiveUsers();
-                } else {
-                    const data = await response.json();
-                    alert(`Erro ao terminar algoritmo: ${data.message}`);
-                }
+
+                await this.handleResponse(response, "abortAlgorithm");
+
+                alert(`Algoritmo do utilizador ${userId} foi terminado.`);
+                // Refresh active users list
+                this.getActiveUsers();
             } catch (error) {
-                console.error("[abortAlgorithm] Erro ao terminar algoritmo:", error);
-                alert("Erro ao terminar algoritmo.");
+                console.log("[abortAlgorithm] Error:", error.message)
+                let userMessage = "Erro ao terminar algoritmo.";
+
+                if (error.message.includes('404')) {
+                    userMessage = `Nenhum algoritmo ativo encontrado para o utilizador ${userId}.`;
+                } else if (error.message.includes('403')) {
+                    userMessage = "Não tem permissão para terminar algoritmos de outros utilizadores.";
+                } else if (error.message.includes('500')) {
+                    userMessage = "Erro no servidor. Por favor tente novamente.";
+                }
+
+                alert(userMessage);
+            } finally {
+                // Always close the dropdown
+                this.algorithmMenuOpen = false;
             }
-            
-            // Close the dropdown
-            this.algorithmMenuOpen = false;
         },
         refreshGanttChart() {
             this.renderKey++; // Forces re-rendering of GanttChart
@@ -674,33 +724,60 @@ export default {
                 credentials: 'include',
             })
                 .catch((error) => {
-                    console.error("Erro na solicitação de eliminação do ficheiro:", error);
+                    console.warn("[deleteInputFile] Warning:", error.message);
                 });
         },
-        async checkAdminPriviliges() {
+        async checkAdminPrivileges() {
+            if (!this.userID) return;
+
             try {
-                const response = await fetch(`${this.apiUrl}/checkAdminPriviliges?user_id=${this.userID}`, {
+                const response = await fetch(`${this.apiUrl}/checkAdminPrivileges?user_id=${this.userID}`, {
                     method: 'GET',
                     credentials: 'include',
-                    headers: { "Content-Type": "application/json" },
                 });
-                
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.isAdmin == true) {
-                        this.isAdmin = true;
-                    }
-                    else {
-                        this.isAdmin = false;
-                    }
-                }
-                else {
-                    console.error("Erro na verificação do status do utilizador.");
-                    alert("Erro na verificação do status do utilizador.");
-                }
+
+                const data = await this.handleResponse(response, "checkAdminPrivileges");
+
+                // Update admin status
+                this.isAdmin = Boolean(data.isAdmin);
+
             } catch (error) {
-                console.log("[checkAdminPriviliges] Erro na verificação do status do utilizador:", error);
-                alert("Erro na verificação do status do utilizador.");
+                console.warn("[checkAdminPrivileges] Warning:", error.message);
+                this.isAdmin = false; // Safe default
+            }
+        },
+        async handleResponse(response, context) {
+            // Check status first
+            if (!response.ok) {
+                // Try to get detailed error message
+                const contentType = response.headers.get('content-type');
+
+                if (contentType?.includes('application/json')) {
+                    try {
+                        const errorData = await response.json();
+                        console.log(`[${context}] Error: ${errorData.message || response.statusText}`)
+                        throw new Error(errorData.message || response.statusText);
+                    } catch {
+                        console.log(`[${context}] Error: ${response.statusText}`)
+                        throw new Error(response.statusText);
+                    }
+                } else {
+                    // Not JSON, so use status text
+                    console.log(`[${context}] Error: ${response.statusText}`)
+                    throw new Error(response.statusText);
+                }
+            }
+
+            // Only parse successful responses
+            const contentType = response.headers.get('content-type');
+    
+            if (contentType?.includes('application/json')) {
+                return await response.json();
+            } else if (contentType?.includes('text/')) {
+                return await response.text();
+            } else {
+                // For blobs, files, etc.
+                return response;
             }
         }
     },
@@ -780,7 +857,7 @@ body {
 
 .terminate-btn {
     padding: 8px 15px;
-    background-color: #d9534f; /* Red background for terminate action */
+    background-color: #d9534f;
     color: white;
     border: none;
     border-radius: 5px;

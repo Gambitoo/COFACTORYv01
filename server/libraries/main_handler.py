@@ -9,6 +9,7 @@ def processExtrusionInput(dataHandler, file_name):
     no_routings, no_bom = [], []
     Extrusion_Input = load_workbook(file_name)
     Extrusion_Input_Active = Extrusion_Input.active
+    
     for row in Extrusion_Input_Active.iter_rows(min_row=2, values_only=True):
         product_name, qty, due_date, weight = row[:4]
         item = Items.get_Item(product_name, dataHandler.Database)
@@ -59,11 +60,6 @@ def processExtrusionInput(dataHandler, file_name):
                     item_list.append(ep.ItemRelated.Name)
                 if any(item_list == BoMs for BoMs in BoMs_to_deactivate):
                     plans_to_exclude.extend(exec_plan.BoMId for exec_plan in exec_plans)
-                # Check if all related Items with the same BoMid belong to one of the deactivated BoMs
-                #if all(any(exec_plan.ItemRelated.Name in BoMs for BoMs in BoMs_to_deactivate) for exec_plan in
-                #       exec_plans):
-                    # Add all the execution plans belonging to the deactivated BoM to plans_to_exclude
-                #    plans_to_exclude.extend(exec_plan.id for exec_plan in exec_plans)
 
         # Remove the execution plans by their id
         for bomId in plans_to_exclude:
@@ -84,6 +80,7 @@ def executePandS(dataHandler, PT_Settings, user_id):
         st_Tref = tm.time()
         Tref = TrefPandS(DataHandler=dataHandler, user_id=user_id)
         Tref.Planning()  # Ensure Tref.Planning() checks for abort periodically
+        
         execution_time_ROD = 0
 
         if PT_Settings:

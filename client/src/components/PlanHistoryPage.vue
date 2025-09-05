@@ -220,10 +220,12 @@ export default {
           this.currentPage = 1;
           this.$nextTick(() => this.updateContentHeight());
         } else {
+          console.error("[getPlanHistory] Error: Couldn't getting plan history.");
           alert("Erro ao obter histórico de planos.");
         }
       } catch (error) {
-        console.error("Erro ao carregar o histórico:", error);
+        console.error("[getPlanHistory] Error:", error.message);
+        console.error("Erro ao carregar histórico de planos:", error);
       }
     },
     changePage(page) {
