@@ -109,7 +109,7 @@ export default {
             menuOpen: false,
             algorithmMenuOpen: false,
             activeUsers: [],
-            apiUrl: `http://${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`,
+            apiUrl: `${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`,
         };
     },
     async mounted() {

@@ -2,7 +2,7 @@ import { ref, reactive } from 'vue';
 import axios from 'axios';
 import { startOfWeek, endOfWeek } from 'date-fns';
 
-const apiUrl = `http://${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`;
+const apiUrl = `${import.meta.env.VITE_FLASK_HOST}:${import.meta.env.VITE_FLASK_PORT}`;
 
 const machines = ref([]);
 const exec_plans = ref([]);
