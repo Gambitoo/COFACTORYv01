@@ -161,7 +161,7 @@ class RODPandS():
             # Get latest execution plan for the machine
             cursor.execute(
                 """SELECT TOP 1 po.Item, po.PlannedDeliveryDateTime 
-                   FROM ExecutionPlans po 
+                   FROM ProductionOrders po 
                    JOIN Items i ON po.Item COLLATE SQL_Latin1_General_CP1_CI_AS = i.Item 
                    WHERE i.Process = 'ROD' AND po.Routing = ? 
                    ORDER BY PlannedDeliveryDateTime DESC""", 

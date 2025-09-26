@@ -553,6 +553,7 @@ export default {
                             this.isAlgorithmRunning = false;
                             break;
                         case 'running':
+                            this.isAlgorithmRunning = true;
                             // Still running, check again in 2 seconds
                             setTimeout(checkStatus, 2000);
                             break;

@@ -53,7 +53,7 @@
             </td>
             <td>
               <div class="button-container">
-                <button @click="openGanttModal(plan)">
+                <button v-if="plan.outputFiles.length > 0" @click="openGanttModal(plan)">
                   Ver Plano
                 </button>
               </div>
@@ -63,7 +63,7 @@
                 <span 
                   :class="getStatusClass(plan)"
                   @click="handleStatusClick(plan)"
-                  :style="{ cursor: 'pointer' }">
+                  :style="{ cursor: getStatusCursor(plan) }">
                   {{ getStatusText(plan) }}
                 </span>
               </div>
@@ -223,12 +223,12 @@ export default {
           console.error("[getPlanHistory] Error: Couldn't getting plan history.");
           alert("Erro ao obter histórico de planos.");
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error("[getPlanHistory] Error:", error.message);
         console.error("Erro ao carregar histórico de planos:", error);
       }
     },
-    changePage(page) {
+    changePage(page: number) {
       if (page >= 1 && page <= this.totalPages) {
         this.currentPage = page;
         // Scroll to top of table when changing pages
@@ -249,7 +249,7 @@ export default {
 
       return date.toLocaleString("pt-PT", options);
     },
-    formatDateForId(timestamp) {
+    formatDateForId(timestamp: any) {
       const [datePart, timePart] = timestamp.split(', ');
       const [day, month, year] = datePart.split('/');
       const newDay = parseInt(day).toString();
@@ -311,7 +311,7 @@ export default {
       // Reset to first page after sorting
       this.currentPage = 1;
     },
-    processCriteria(criteriaArray) {
+    processCriteria(criteriaArray: Array<string>) {
       return criteriaArray.map(criterion => {
         criterion = criterion.trim();
 
@@ -348,7 +348,7 @@ export default {
         }
       });
     },
-    formatComplexValue(valueStr) {
+    formatComplexValue(valueStr: string) {
       if (valueStr.startsWith('[')) {
 
         const content = valueStr.substring(1, valueStr.length - 1);
@@ -440,7 +440,7 @@ export default {
       return [valueStr];
     },
 
-    formatNestedValue(valueStr) {
+    formatNestedValue(valueStr: string) {
       // Format nested array values more nicely
       if (valueStr.startsWith('[')) {
         try {
@@ -459,7 +459,7 @@ export default {
       }
       return valueStr;
     },
-    openGanttModal(plan) {
+    openGanttModal(plan: any) {
       this.showGanttModal = true;
       this.selectedPlan = plan;
     },
@@ -467,7 +467,7 @@ export default {
       this.showGanttModal = false;
       this.selectedPlan = null;
     },
-    openCriteriaModal(criteria) {
+    openCriteriaModal(criteria: any) {
       this.showCriteriaModal = true;
       this.criteria = criteria;
     },
@@ -476,33 +476,39 @@ export default {
       this.criteria = null;
     },
     // Status-related methods
-    getStatusText(plan) {
-      if (plan.state === 'temporary') {
-        return 'Plano em processamento';
-      } else if (plan.state === 'created') {
-        return 'Plano gerado';
-      } else if (plan.state === 'accepted') {
-        return 'Plano aceite';
-      } else {
-        return 'Plano gerado';
+    getStatusText(plan: Record<string, string>) {
+      switch(plan.state) {
+        case 'temporary':
+          return 'Plano em processamento';
+        case 'created':
+          return 'Plano gerado';
+        case 'accepted':
+          return 'Plano aceite';
+        case 'aborted':
+          return 'Plano cancelado';
+        default:
+          return 'Plano gerado';
       }
     },
-    getStatusClass(plan) {
-      if (plan.state === 'temporary') {
-        return 'status-processing';
-      } else if (plan.state === 'created') {
-        return 'status-generated';
-      } else if (plan.state === 'accepted') {
-        return 'status-accepted';
-      } else {
-        return 'status-generated';
+    getStatusClass(plan: Record<string, string>) {
+      switch(plan.state) {
+        case 'temporary':
+          return 'status-processing';
+        case 'created':
+          return 'status-generated';
+        case 'accepted':
+          return 'status-accepted';
+        case 'aborted':
+          return 'status-aborted';
+        default:
+          return 'status-generated';
       }
     },
-    getStatusCursor(plan) {
+    getStatusCursor(plan: Record<string, string>) {
       // Only allow clicking if the status is 'created' (Plano gerado)
-      return plan.state === 'created' ? 'pointer' : 'default';
+      return (plan.state === 'created' || plan.state === 'accepted') ? 'pointer' : 'default';
     },
-    handleStatusClick(plan) {
+    handleStatusClick(plan: Record<string, string>) {
       // Only allow changing status from 'created' to 'accepted'
       if (plan.state === 'created') {
         // Update the plan state locally
@@ -808,6 +814,20 @@ ul {
   padding: 4px 8px;
   border-radius: 4px;
   background-color: #d1ecf1;
+  border: 1px solid #bee5eb;
+  transition: background-color 0.3s;
+}
+
+.status-accepted:hover {
+  background-color: #bee5eb;
+}
+
+.status-aborted {
+  color: #b92121;
+  font-weight: bold;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: #f3d9d9;
   border: 1px solid #bee5eb;
 }
 

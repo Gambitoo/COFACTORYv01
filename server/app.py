@@ -27,10 +27,7 @@ load_dotenv('.env')
 
 ADMINS = os.environ.get('ADMIN', '') # Get which users have admin privileges
 
-if ADMINS:
-    ADMINS = [int(x.strip()) for x in ADMINS.split(',') if x.strip().isdigit()]
-else:
-    ADMINS = []
+ADMINS = [x.strip() for x in (ADMINS or '').split(',') if x.strip()]
 
 INPUT_FOLDER = os.environ.get('STORAGE_PATH')
 ALLOWED_EXTENSIONS = {'xlsx'}
@@ -78,24 +75,9 @@ for db_name, connection_string in connection_strings.items():
 CORS(app, resources={r'/*': {'origins': '*'}}, supports_credentials=True)
 
 def get_chart_data(database):
-    #exec_plan_instances = ExecutionPlan.GR_instances if database == "COFACTORY_GR" else ExecutionPlan.PT_instances
     time_unit_instances = TimeUnit.GR_instances if database == "COFACTORY_GR" else TimeUnit.PT_instances
     machine_instances = Machines.GR_instances if database == "COFACTORY_GR" else Machines.PT_instances
     ln_production_orders_instances = LN_ProductionOrders.GR_instances if database == "COFACTORY_GR" else LN_ProductionOrders.PT_instances
-
-    """exec_plans = [
-        {
-            'id': ep.id,
-            'itemRoot': ep.ItemRoot.Name if ep.ItemRoot is not None else None,
-            'itemRelated': ep.ItemRelated.Name,
-            'quantity': ep.Quantity,
-            'ST': ep.ST,
-            'CoT': ep.CoT,
-            'machine': ep.Machine,
-            'orderIncrement': ep.ItemRelated.OrderIncrement,
-        }
-        for ep in exec_plan_instances
-    ]"""
 
     time_units = [
         {
@@ -146,22 +128,10 @@ def get_chart_data(database):
     return time_units, machines, ln_production_orders
 
 def get_new_chart_data(dataHandler, planoId = None):
-    #exec_plan_instances = ExecutionPlan.GR_instances if dataHandler.Database == "COFACTORY_GR" else ExecutionPlan.PT_instances
     machine_instances = Machines.GR_instances if dataHandler.Database == "COFACTORY_GR" else Machines.PT_instances
     ln_production_orders_instances = LN_ProductionOrders.GR_instances if dataHandler.Database == "COFACTORY_GR" else LN_ProductionOrders.PT_instances
     
     # Helper function to format execution plans consistently
-    """def format_exec_plan(ep):
-        return {
-            'id': ep.id,
-            'itemRoot': ep.ItemRoot.Name if ep.ItemRoot is not None else None,
-            'itemRelated': ep.ItemRelated.Name,
-            'quantity': ep.Quantity,
-            'ST': ep.ST,
-            'CoT': ep.CoT,
-            'machine': ep.Machine,
-            'orderIncrement': ep.ItemRelated.OrderIncrement,
-        }"""
     
     def format_plan(row, database):
         item = Items.get_Item(row[3], database)
@@ -198,19 +168,7 @@ def get_new_chart_data(dataHandler, planoId = None):
                 Plan = load_workbook(os.path.join(user_folder_path, detailed_plan_path))
                 Plan_Active = Plan.active
                 new_exec_plans = [format_plan(row, dataHandler.Database) for row in Plan_Active.iter_rows(min_row=2, values_only=True)]
-    
-    # Filter by planoId if it exists, otherwise use all plans
-    #filtered_plans = [ep for ep in exec_plan_instances if ep.PlanoId != planoId] if planoId else [ep for ep in exec_plan_instances]
-    
-    # Format all execution plans
-    #exec_plans = [format_exec_plan(ep) for ep in filtered_plans]
-    
-    # Filter new plans by planoId if it exists, otherwise use all plans
-    #filtered_new_plans = [ep for ep in exec_plan_instances if ep.PlanoId == planoId] if planoId else dataHandler.ExecutionPlans
-
-    # Format plan specific execution plans
-    #new_exec_plans = [format_exec_plan(ep) for ep in filtered_new_plans]
-
+                
     # Format time units
     time_units = [
         {
@@ -261,27 +219,31 @@ def get_new_chart_data(dataHandler, planoId = None):
     
     return new_exec_plans, time_units, machines, ln_production_orders
 
-def get_ep_by_plano_id(database, plano_id):
-    exec_plan_instances = ExecutionPlan.GR_instances if database == "COFACTORY_GR" else ExecutionPlan.PT_instances
+def get_ep_by_plano_id(plano_id):
+    detailed_plan_path = os.path.join(plano_id, "OUTPUT_MetalPlanDetailed.xlsx") 
+                
+    Plan = load_workbook(detailed_plan_path)
+    Plan_Active = Plan.active
 
-    filtered_instances = [ep for ep in exec_plan_instances if ep.PlanoId == plano_id]
-
-    if not filtered_instances:
-        return []  # Return an empty list if no matching execution plans are found
-
-    min_ST = min(ep.ST for ep in filtered_instances)
-    max_CoT = max(ep.CoT for ep in filtered_instances)
+    min_ST = min(row[6] for row in Plan_Active.iter_rows(min_row=2, values_only=True))
+    max_CoT = max(row[7] for row in Plan_Active.iter_rows(min_row=2, values_only=True))
 
     return [min_ST, max_CoT]
+
+def check_if_admin(user_id):
+    user_id_int = user_id if isinstance(user_id, int) else user_id
+    is_admin = user_id_int in ADMINS
+    
+    return is_admin
 
 @app.route('/checkAdminPrivileges', methods=['GET'])
 def check_admin_privileges():
     # Check if current user is an admin
+    
     user_id = session.get('user_id') or request.args.get('user_id')
 
     try:
-        user_id_int = int(user_id) if user_id else None
-        is_admin = user_id_int in ADMINS
+        is_admin = check_if_admin(user_id)
         return jsonify({'isAdmin': is_admin}), 200
     except (ValueError, TypeError):
         return jsonify({'isAdmin': False}), 200
@@ -302,37 +264,38 @@ async def select_branch():
         if selected_branch not in ["COFACTORY_PT", "COFACTORY_GR"]:
             return jsonify({'status': 'error', 'message': 'Unidade de produção inválida.'}), 400
 
-        # Save the user ID in the session
-        session['user_id'] = user_id
+        if user_id not in running_algorithms:
+            # Save the user ID in the session
+            session['user_id'] = user_id
 
-        # Update the input and temp folder paths for the specific user (session)
-        branch_folder = os.path.join(INPUT_FOLDER, selected_branch)
-        upload_folder = os.path.join(branch_folder, user_id)
-        temp_folder = os.path.join(upload_folder, 'temp')
+            # Update the input and temp folder paths for the specific user (session)
+            branch_folder = os.path.join(INPUT_FOLDER, selected_branch)
+            upload_folder = os.path.join(branch_folder, user_id)
+            temp_folder = os.path.join(upload_folder, 'temp')
 
-        # Store paths in session for request context
-        session['branch_folder'] = branch_folder
-        session['temp_folder'] = temp_folder
-        session['machines_to_remove'] = []
-        session['BoMs_to_remove'] = []
+            # Store paths in session for request context
+            session['branch_folder'] = branch_folder
+            session['temp_folder'] = temp_folder
+            session['machines_to_remove'] = []
+            session['BoMs_to_remove'] = []
 
-        # Create the folders
-        os.makedirs(upload_folder, exist_ok=True)
-        os.makedirs(temp_folder, exist_ok=True)
+            # Create the folders
+            os.makedirs(upload_folder, exist_ok=True)
+            os.makedirs(temp_folder, exist_ok=True)
 
-        # Get the connection string, which contains the server, chosen database, and the username and password to access it
-        connection_string = connection_strings[selected_branch]
+            # Get the connection string, which contains the server, chosen database, and the username and password to access it
+            connection_string = connection_strings[selected_branch]
 
-        # Store data in the global dictionary instead of session
-        user_data[user_id] = {
-            "input_data": DataHandler(selected_branch, connection_string),
-            "branch_folder": None,
-            "input_folder": None,
-            "temp_folder": None
-        }
+            # Store data in the global dictionary instead of session
+            user_data[user_id] = {
+                "input_data": DataHandler(selected_branch, connection_string),
+                "branch_folder": None,
+                "input_folder": None,
+                "temp_folder": None
+            }
 
-        # Set up the data handler
-        user_data[user_id]['input_data'].setupData() 
+            # Set up the data handler
+            user_data[user_id]['input_data'].setupData() 
 
         return jsonify({
             'status': 'success', 
@@ -408,17 +371,28 @@ def allowed_file(filename):
 def cleanup_temp_folder():
     """Delete useless temp files from the temp folder of each user."""
     now = time.time()
+                            
+    for db_name in connection_strings:
+        try:
+            # Get all plan folders for this database
+            branch_folder = os.path.join(INPUT_FOLDER, db_name)
+            if not os.path.exists(branch_folder):
+                continue
+            
+            # Get all user folders
+            for user_folder in [folder for folder in os.listdir(branch_folder) if os.path.isdir(os.path.join(branch_folder, folder))]:
+                temp_folder = os.path.join(branch_folder, user_folder, "temp")
+                
+                if os.path.isdir(temp_folder):
+                    for filename in os.listdir(temp_folder):
+                        file_path = os.path.join(temp_folder, filename)
+                        if os.path.isfile(file_path) and (now - os.path.getmtime(file_path)) > TEMP_FILES_LIFETIME:
+                            os.remove(file_path)
+                            print(f"Deleted old temp file: {file_path}")
     
-    for _, user_info in user_data.items():
-        if "temp_folder" in user_info and user_info["temp_folder"]:
-            for filename in os.listdir(user_info['temp_folder']):
-                file_path = os.path.join(user_info['temp_folder'], filename)
-                if os.path.isfile(file_path):
-                    file_age = now - os.path.getmtime(file_path)
-                    if file_age > TEMP_FILES_LIFETIME:
-                        os.remove(file_path)
-                        print(f"Deleted old temp file: {file_path}")
-                        
+        except pyodbc.Error as ex:
+            print(f"Error synchronizing plan folders for {db_name}: {ex}")
+            
 def sync_plan_folders_with_db():
     """Sync plan folders with database records.
     Delete folders that don't have corresponding execution plans in the database."""
@@ -625,8 +599,6 @@ def process_criteria():
 
         # Save the criteria in the dataHandler of the respective user
         dataHandler.Criteria = parsed_criteria
-        print(parsed_criteria)
-        print(dataHandler.Criteria)
 
         # Add the criteria to the temp folder
         with open(os.path.join(session['temp_folder'], "criteria.txt"), "w") as f:
@@ -636,7 +608,6 @@ def process_criteria():
                 if criteria:
                     # Add the basic criterion name
                     text = all_criteria[idx]
-                    print(text)
 
                     # For removing machines or BoMs, add details
                     if idx == 0 or idx == 5:
@@ -787,6 +758,8 @@ def create_data():
                 'status': 'error',
                 'message': 'Ficheiro de entrada não encontrado.'
             }), 400
+            
+        
 
         if dataHandler.CurrentTime is None:
             dataHandler.CurrentTime = datetime.now()
@@ -833,6 +806,7 @@ def run_algorithm_in_thread(user_id, dataHandler, PT_Settings):
             running_algorithms[user_id]["message"] = "Algoritmo executado com sucesso." 
             running_algorithms[user_id]["late_orders"] = late_orders
             saveData(user_id, dataHandler)
+            
     except Exception as e:
         import traceback
         # Update status with error information
@@ -979,7 +953,7 @@ def abort_algorithm():
     
     # If terminating another user's algorithm, check admin privileges
     if target_user_id and target_user_id != current_user_id:
-        if int(current_user_id) not in ADMINS:
+        if current_user_id not in ADMINS:
             return jsonify({'status': 'error', 'message': 'Acesso negado. São necessários privilégios de administrador para realizar esta ação.'}), 403
         
     # Check if there's an algorithm running for this user
@@ -991,6 +965,10 @@ def abort_algorithm():
         running_algorithms[user_id]["status"] = "aborted"
         running_algorithms[user_id]["success"] = False
         running_algorithms[user_id]["message"] = f"A execução do algoritmo foi abortada {'pelo administrador' if target_user_id else ''}."
+        
+        # Save the input file and criteria as an aborted plan
+        dataHandler = user_data[user_id]['input_data']
+        saveData(user_id, dataHandler, True)
         
         if user_id in user_data and 'temp_folder' in user_data[user_id] and user_data[user_id]['temp_folder']:
             for filename in os.listdir(user_data[user_id]['temp_folder']):
@@ -1005,21 +983,27 @@ def abort_algorithm():
     # If we get here, either there's no algorithm for this user or it's already completed
     return jsonify({'status': 'not_found', 'message': f"Não foi encontrado nenhum algoritmo em execução {'para o utilizador ' + user_id if target_user_id else ''}."}), 404
 
-def saveData(user_id, dataHandler):
+def saveData(user_id, dataHandler, aborted=False):
     # Get the minimum ST value from all execution plans
-    min_ST = min(plan.ST for plan in dataHandler.ExecutionPlans)
-    
-    formatted_ST = int(min_ST.strftime("%d%m%Y%H%M%S"))
+    if not aborted:
+        min_ST = min(plan.ST for plan in dataHandler.ExecutionPlans)
+        formatted_ST = int(min_ST.strftime("%d%m%Y%H%M%S"))
+    else:
+        formatted_ST = int(dataHandler.CurrentTime.strftime("%d%m%Y%H%M%S"))
     
     plano_id = f"{formatted_ST}_{user_id}"
-    
+        
     # Get the user's folder
     user_folder = os.path.join(user_data[user_id]['branch_folder'], user_id)
-    
+        
     # Move file from temporary storage to permanent location
     input_file = user_data[user_id]['input_file']  
     if input_file and os.path.exists(input_file):
-        new_plan_folder = os.path.join(user_folder, plano_id)
+        if aborted:
+            new_plan_folder = os.path.join(user_folder, plano_id + "_ABORTED")
+        else:
+            new_plan_folder = os.path.join(user_folder, plano_id)
+
         os.makedirs(new_plan_folder, exist_ok=True)
         new_plan_path = os.path.join(new_plan_folder, f"Plano_{formatted_ST}.xlsx")
         os.rename(input_file, new_plan_path)
@@ -1031,37 +1015,31 @@ def saveData(user_id, dataHandler):
     else:
         return jsonify({'status': 'not_found', "message": "Ficheiro não encontrado."}), 404    
     
-    # Organize the created plan in two Excel files, and write them to the plan folder
-    PT_Settings = True if dataHandler.Database == "COFACTORY_PT" else False
-    PO_Excel = dataHandler.writeExcelData(PT_Settings, False)
-    detailed_PO_Excel = dataHandler.writeExcelData(PT_Settings, True)
-    
-    # File names and their content
-    file_names = {"OUTPUT_MetalPlan.xlsx": PO_Excel, "OUTPUT_MetalPlanDetailed.xlsx": detailed_PO_Excel}
-    
-    # Write the plan Excel files to their respective plan folder
-    for filename, file_obj in file_names.items():
-        file_path = os.path.join(new_plan_folder, filename)
-        with open(file_path, "wb") as f:
-            f.write(file_obj.getvalue())
+    if not aborted:
+        # Organize the created plan in two Excel files, and write them to the plan folder
+        PT_Settings = True if dataHandler.Database == "COFACTORY_PT" else False
+        PO_Excel = dataHandler.writeExcelData(PT_Settings, False)
+        detailed_PO_Excel = dataHandler.writeExcelData(PT_Settings, True)
 
-    # Save plan in the correct DB
-    dataHandler.writeDBData(plano_id)
-    
-    # Create a zip file with both output files
-    zip_file_path = os.path.join(new_plan_folder, "OUTPUT_Plans.zip")
+        # File names and their content
+        file_names = {"OUTPUT_MetalPlan.xlsx": PO_Excel, "OUTPUT_MetalPlanDetailed.xlsx": detailed_PO_Excel}
 
-    # Create a ZIP archive for OUTPUT files
-    with zipfile.ZipFile(zip_file_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        # Write the plan Excel files to their respective plan folder
         for filename, file_obj in file_names.items():
-            zipf.writestr(filename, file_obj.getvalue())
-    
-    if dataHandler.Database == "COFACTORY_GR":
-        ExecutionPlan.GR_instances.extend(dataHandler.ExecutionPlans)
-        TimeUnit.GR_instances.extend(dataHandler.TimeUnits)
-    else: 
-        ExecutionPlan.PT_instances.extend(dataHandler.ExecutionPlans)
-        TimeUnit.PT_instances.extend(dataHandler.TimeUnits)
+            file_path = os.path.join(new_plan_folder, filename)
+            with open(file_path, "wb") as f:
+                f.write(file_obj.getvalue())
+
+        # Save plan in the correct DB
+        dataHandler.writeDBData(plano_id)
+
+        # Create a zip file with both output files
+        zip_file_path = os.path.join(new_plan_folder, "OUTPUT_Plans.zip")
+
+        # Create a ZIP archive for OUTPUT files
+        with zipfile.ZipFile(zip_file_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for filename, file_obj in file_names.items():
+                zipf.writestr(filename, file_obj.getvalue())
 
 @app.route('/savePlan', methods=['POST'])
 def save_plan():
@@ -1130,13 +1108,6 @@ def save_plan():
             zip_buffer = BytesIO(f.read())
         zip_buffer.seek(0)
 
-        if dataHandler.Database == "COFACTORY_GR":
-            ExecutionPlan.GR_instances.extend(dataHandler.ExecutionPlans)
-            TimeUnit.GR_instances.extend(dataHandler.TimeUnits)
-        else: 
-            ExecutionPlan.PT_instances.extend(dataHandler.ExecutionPlans)
-            TimeUnit.PT_instances.extend(dataHandler.TimeUnits)
-
         return send_file(zip_buffer, as_attachment=True, download_name='OUTPUT_Plans.zip', mimetype='application/zip')
     
     except Exception as e:
@@ -1163,11 +1134,17 @@ def plan_history():
 
         branch_folder = os.path.join(INPUT_FOLDER, dataHandler.Database)
 
-        folders = [
-            folder for folder in os.listdir(branch_folder)
-            if os.path.isdir(os.path.join(branch_folder, folder))
-        ]
-
+        # Determine which folders to process based on admin privileges
+        if check_if_admin(user_id):
+            # If admin get all user folders
+            folders = [
+                folder for folder in os.listdir(branch_folder)
+                if os.path.isdir(os.path.join(branch_folder, folder))
+            ]
+        else:
+            # If non-admin get only their own folder
+            folders = [str(user_id)] if os.path.isdir(os.path.join(branch_folder, str(user_id))) else []
+        
         for user_folder in folders:
             user_folder_path = os.path.join(branch_folder, user_folder)
 
@@ -1177,18 +1154,15 @@ def plan_history():
                 for folder in os.listdir(user_folder_path)
                 if os.path.isdir(os.path.join(user_folder_path, folder))
             ]
-
+            
             # Sort folders by modification time (latest first)
             plan_folders.sort(key=lambda x: x[1], reverse=True)
-
-            # Plan folders that dont exist in the DB should be removed
-            folders_to_remove = []
 
             for path_folder, _ in plan_folders:
                 plan_folder_path = os.path.join(user_folder_path, path_folder)
 
                 # Get temp folder plan
-                if plan_folder_path == session['temp_folder'] and len(os.listdir(plan_folder_path)) != 0:
+                if (path_folder == 'temp' and len(os.listdir(plan_folder_path)) != 0) or "_ABORTED" in path_folder:
                 
                     # Prepare lists for input files, output files, and criteria content
                     input_files = []
@@ -1221,9 +1195,9 @@ def plan_history():
                         "ST": None,
                         "CoT": None,
                         "criteria": criteria_contents,
-                        "state": "temporary"
+                        "state": "aborted" if "_ABORTED" in path_folder else "temporary"
                     })
-                else:
+                elif path_folder != 'temp':
                     # Prepare lists for input files, output files, and criteria content
                     input_files = []
                     output_files = []
@@ -1254,10 +1228,9 @@ def plan_history():
                                             criteria_contents.append(line.strip())
 
                     # Get the plan's ST and CoT 
-                    ST_and_CoT = get_ep_by_plano_id(dataHandler.Database, path_folder)
+                    ST_and_CoT = get_ep_by_plano_id(plan_folder_path)
 
                     if not ST_and_CoT:
-                        folders_to_remove.append(plan_folder_path)
                         continue
                     
                     # Append the structured data to the response list
@@ -1271,15 +1244,7 @@ def plan_history():
                         "criteria": criteria_contents,
                         "state": "created"
                     })
-
-        # Remove folders after completing all processing
-        for folder_path in folders_to_remove:
-            try:
-                shutil.rmtree(folder_path) 
-                print(f"Removed orphaned plan folder: {folder_path}")
-            except Exception as e:
-                print(f"Error removing folder {folder_path}: {e}")
-
+                    
         return jsonify(plan_history_list), 200
     
     except Exception as e:
@@ -1312,7 +1277,7 @@ if __name__ == '__main__':
     scheduler.add_job(cleanup_temp_folder, 'interval', minutes=TEMP_CLEANUP_INTERVAL)
     
     # Add plan folder and DB sync job
-    scheduler.add_job(sync_plan_folders_with_db, 'interval', hours=TEMP_PLAN_SYNC)
+    #scheduler.add_job(sync_plan_folders_with_db, 'interval', hours=TEMP_PLAN_SYNC)
     scheduler.start()
     
     try:

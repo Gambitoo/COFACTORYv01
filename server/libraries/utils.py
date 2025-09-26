@@ -821,11 +821,11 @@ class DataHandler:
 
         create_stock_objects(data["stock"])
 
-        create_timeunits_objects(data["timeunits"])
+        #create_timeunits_objects(data["timeunits"])
 
-        create_executionplans_objects(data["execution_plans"])
+        #create_executionplans_objects(data["execution_plans"])
 
-        create_timeunit_executionplans_objects(data["timeunit_executionplans"])
+        #create_timeunit_executionplans_objects(data["timeunit_executionplans"])
         
         create_ln_production_orders_objects(data["production_orders"])
 
